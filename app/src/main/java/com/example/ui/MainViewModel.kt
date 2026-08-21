@@ -23,7 +23,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 data class MainUiState(
-    val selectedTab: Int = 0, // 0: Home/Scraper, 1: Downloads, 2: Playlists, 3: Settings
+    val selectedTab: Int = 0, // 0: Home/Scraper, 1: Downloads, 2: Settings
     val inputUrlText: String = "",
     val isExtracting: Boolean = false,
     val extractedVideoDetails: VideoDetails? = null,
@@ -172,14 +172,20 @@ class MainViewModel(
         _uiState.value = _uiState.value.copy(showQuickDownloadModal = false)
     }
 
-    fun startDownloadFromModal(isAudioOnly: Boolean) {
+    fun startDownloadFromModal(isAudioOnly: Boolean, customTitle: String? = null, threads: Int = 3) {
         val details = _uiState.value.extractedVideoDetails ?: return
         val videoOpt = _uiState.value.selectedVideoOption
         val audioOpt = _uiState.value.selectedAudioOption ?: return
 
+        val effectiveDetails = if (!customTitle.isNullOrBlank()) {
+            details.copy(title = customTitle)
+        } else {
+            details
+        }
+
         viewModelScope.launch {
             repository.startDownload(
-                videoDetails = details,
+                videoDetails = effectiveDetails,
                 selectedVideo = videoOpt,
                 selectedAudio = audioOpt,
                 isAudioOnly = isAudioOnly
@@ -187,7 +193,7 @@ class MainViewModel(
             _uiState.value = _uiState.value.copy(
                 showQuickDownloadModal = false,
                 selectedTab = 1, // Switch to downloads tab
-                bannerMessage = "${details.title.take(25)}... দ্রুত ডাউনলোড শুরু হয়েছে!"
+                bannerMessage = "${effectiveDetails.title.take(22)}... (${threads} Threads) ডাউনলোড শুরু হয়েছে!"
             )
         }
     }

@@ -1,516 +1,632 @@
 package com.example.ui.components
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.LocalTextSelectionColors
+import androidx.compose.foundation.text.selection.TextSelectionColors
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material.icons.outlined.*
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import coil.compose.AsyncImage
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.example.data.model.AudioTrackOption
-import com.example.data.model.PlatformType
 import com.example.data.model.VideoDetails
 import com.example.data.model.VideoStreamOption
-import com.example.ui.theme.AmberGold
-import com.example.ui.theme.CrimsonRed
-import com.example.ui.theme.EmeraldCyan
+import kotlin.math.roundToInt
 
-@OptIn(ExperimentalMaterial3Api::class)
+private val HeaderRed = Color(0xFFB71C1C) // NewPipe Crimson Red Header
+private val DialogDarkBackground = Color(0xFF2B2B2B)
+private val DialogTextSecondary = Color(0xFFB0B0B0)
+
+data class CaptionOption(
+    val id: String,
+    val languageName: String,
+    val format: String = "VTT / SRT",
+    val sizeEstimatedMb: Double = 0.08
+)
+
+val sampleCaptions = listOf(
+    CaptionOption("bn_caption", "বাংলা সাবটাইটেল (Bengali)", "SRT"),
+    CaptionOption("en_caption", "English Subtitles", "VTT"),
+    CaptionOption("ar_caption", "Arabic (العربية)", "SRT")
+)
+
 @Composable
 fun QuickDownloadBottomSheet(
     videoDetails: VideoDetails,
-    selectedTab: Int, // 0: Video, 1: Audio
+    selectedTab: Int, // 0: Video, 1: Audio, 2: Captions
     selectedVideoOption: VideoStreamOption?,
     selectedAudioOption: AudioTrackOption?,
     onTabSelected: (Int) -> Unit,
     onVideoOptionSelected: (VideoStreamOption) -> Unit,
     onAudioOptionSelected: (AudioTrackOption) -> Unit,
-    onStartDownload: (isAudioOnly: Boolean) -> Unit,
+    onStartDownload: (isAudioOnly: Boolean, customTitle: String, threads: Int) -> Unit,
     onPlayDirectStream: (isAudioOnly: Boolean) -> Unit,
     onDismiss: () -> Unit
 ) {
-    ModalBottomSheet(
+    var fileName by remember(videoDetails.title) { mutableStateOf(videoDetails.title) }
+    var selectedMediaType by remember(selectedTab) { mutableIntStateOf(selectedTab) } // 0: Video, 1: Audio, 2: Captions
+    var threadCount by remember { mutableFloatStateOf(3f) }
+    var showStreamSelectorMenu by remember { mutableStateOf(false) }
+    var selectedCaption by remember { mutableStateOf(sampleCaptions.first()) }
+
+    // Ensure initial default selections
+    val currentVideo = selectedVideoOption
+        ?: videoDetails.videoStreams.find { it.qualityLabel.contains("480p") || it.resolutionHeight == 480 }
+        ?: videoDetails.videoStreams.find { it.qualityLabel.contains("720p") || it.resolutionHeight == 720 }
+        ?: videoDetails.videoStreams.firstOrNull()
+
+    val currentAudio = selectedAudioOption
+        ?: videoDetails.audioTracks.find { it.isDefaultSelected }
+        ?: videoDetails.audioTracks.find { it.languageCode.startsWith("bn") }
+        ?: videoDetails.audioTracks.firstOrNull()
+
+    Dialog(
         onDismissRequest = onDismiss,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = MaterialTheme.colorScheme.surface,
-        dragHandle = {
-            BottomSheetDefaults.DragHandle(color = MaterialTheme.colorScheme.outline)
-        },
-        modifier = Modifier.testTag("quick_download_sheet")
+        properties = DialogProperties(
+            dismissOnBackPress = true,
+            dismissOnClickOutside = true,
+            usePlatformDefaultWidth = false
+        )
     ) {
-        Column(
+        Box(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 20.dp)
-                .padding(bottom = 32.dp)
+                .fillMaxSize()
+                .padding(horizontal = 24.dp, vertical = 36.dp),
+            contentAlignment = Alignment.Center
         ) {
-            // Header: Detected Link & Platform
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        modifier = Modifier
-                            .size(10.dp)
-                            .background(EmeraldCyan, CircleShape)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = "সরাসরি লিঙ্ক স্ক্র্যাপার প্রস্তুত",
-                        style = MaterialTheme.typography.labelLarge,
-                        color = EmeraldCyan,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-
-                Surface(
-                    color = Color(videoDetails.sourcePlatform.badgeColorHex).copy(alpha = 0.15f),
-                    shape = RoundedCornerShape(8.dp),
-                    border = BorderStroke(1.dp, Color(videoDetails.sourcePlatform.badgeColorHex).copy(alpha = 0.4f))
-                ) {
-                    Text(
-                        text = videoDetails.sourcePlatform.displayName,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = Color(videoDetails.sourcePlatform.badgeColorHex),
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(14.dp))
-
-            // Media Info Card (Thumbnail + Title + Channel + Duration)
             Surface(
-                color = MaterialTheme.colorScheme.surfaceVariant,
-                shape = RoundedCornerShape(16.dp),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(width = 110.dp, height = 72.dp)
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(Color.Black)
-                    ) {
-                        AsyncImage(
-                            model = videoDetails.thumbnailUrl,
-                            contentDescription = "Thumbnail",
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier.fillMaxSize()
-                        )
-                        // Duration badge
-                        Surface(
-                            color = Color.Black.copy(alpha = 0.8f),
-                            shape = RoundedCornerShape(4.dp),
-                            modifier = Modifier
-                                .align(Alignment.BottomEnd)
-                                .padding(4.dp)
-                        ) {
-                            Text(
-                                text = videoDetails.durationFormatted,
-                                color = Color.White,
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.width(12.dp))
-
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = videoDetails.title,
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = Icons.Default.Person,
-                                contentDescription = null,
-                                modifier = Modifier.size(12.dp),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = videoDetails.author,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // Tab Selector: Video Resolutions vs Audio Tracks
-            TabRow(
-                selectedTabIndex = selectedTab,
-                containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                contentColor = MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier
-                    .clip(RoundedCornerShape(12.dp))
-                    .height(44.dp),
-                indicator = {}
-            ) {
-                Tab(
-                    selected = selectedTab == 0,
-                    onClick = { onTabSelected(0) },
-                    modifier = Modifier
-                        .background(if (selectedTab == 0) CrimsonRed else Color.Transparent)
-                        .testTag("tab_video_resolutions")
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Videocam,
-                            contentDescription = null,
-                            tint = if (selectedTab == 0) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = "ভিডিও অপশন (${videoDetails.videoStreams.size})",
-                            color = if (selectedTab == 0) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
-                            fontWeight = if (selectedTab == 0) FontWeight.Bold else FontWeight.Medium,
-                            fontSize = 13.sp
-                        )
-                    }
-                }
-
-                Tab(
-                    selected = selectedTab == 1,
-                    onClick = { onTabSelected(1) },
-                    modifier = Modifier
-                        .background(if (selectedTab == 1) CrimsonRed else Color.Transparent)
-                        .testTag("tab_audio_tracks")
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Audiotrack,
-                            contentDescription = null,
-                            tint = if (selectedTab == 1) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = "বাংলা ও অন্যান্য অডিও",
-                            color = if (selectedTab == 1) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
-                            fontWeight = if (selectedTab == 1) FontWeight.Bold else FontWeight.Medium,
-                            fontSize = 13.sp
-                        )
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(14.dp))
-
-            // Options List (Video or Audio)
-            Box(
+                shape = RoundedCornerShape(8.dp),
+                color = DialogDarkBackground,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(max = 240.dp)
+                    .widthIn(max = 420.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .testTag("newpipe_download_dialog")
             ) {
-                if (selectedTab == 0) {
-                    // Video Resolutions
-                    if (videoDetails.videoStreams.isEmpty()) {
-                        Box(
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState())
+                ) {
+                    // Header Bar (Red background with Arrow Back, "Download", "OKAY")
+                    Surface(
+                        color = HeaderRed,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(24.dp),
-                            contentAlignment = Alignment.Center
+                                .padding(horizontal = 8.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Text(
-                                text = "এই লিংকে শুধুমাত্র সরাসরি অডিও স্ট্রিম উপলভ্য রয়েছে।",
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                style = MaterialTheme.typography.bodyMedium
-                            )
-                        }
-                    } else {
-                        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            items(videoDetails.videoStreams) { option ->
-                                val isSelected = selectedVideoOption?.id == option.id
-                                Surface(
-                                    onClick = { onVideoOptionSelected(option) },
-                                    shape = RoundedCornerShape(12.dp),
-                                    color = if (isSelected) CrimsonRed.copy(alpha = 0.12f) else MaterialTheme.colorScheme.surfaceVariant,
-                                    border = BorderStroke(
-                                        1.dp,
-                                        if (isSelected) CrimsonRed else MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
-                                    ),
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .testTag("video_option_${option.id}")
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                IconButton(
+                                    onClick = onDismiss,
+                                    modifier = Modifier.testTag("download_dialog_back_button")
                                 ) {
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(horizontal = 14.dp, vertical = 10.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.SpaceBetween
-                                    ) {
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
-                                            RadioButton(
-                                                selected = isSelected,
-                                                onClick = { onVideoOptionSelected(option) },
-                                                colors = RadioButtonDefaults.colors(selectedColor = CrimsonRed)
-                                            )
-                                            Spacer(modifier = Modifier.width(6.dp))
-                                            Column {
-                                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                                    Text(
-                                                        text = option.qualityLabel,
-                                                        fontWeight = FontWeight.Bold,
-                                                        style = MaterialTheme.typography.bodyMedium,
-                                                        color = MaterialTheme.colorScheme.onSurface
-                                                    )
-                                                    if (option.resolutionHeight == 480 || option.qualityLabel.contains("480p")) {
-                                                        Spacer(modifier = Modifier.width(6.dp))
-                                                        Surface(
-                                                            color = CrimsonRed.copy(alpha = 0.15f),
-                                                            shape = RoundedCornerShape(4.dp)
-                                                        ) {
-                                                            Text(
-                                                                text = "ডিফল্ট 480p",
-                                                                fontSize = 9.sp,
-                                                                fontWeight = FontWeight.Bold,
-                                                                color = CrimsonRed,
-                                                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
-                                                            )
-                                                        }
-                                                    }
-                                                    if (option.isHd) {
-                                                        Spacer(modifier = Modifier.width(6.dp))
-                                                        Surface(
-                                                            color = AmberGold.copy(alpha = 0.2f),
-                                                            shape = RoundedCornerShape(4.dp)
-                                                        ) {
-                                                            Text(
-                                                                text = "HD",
-                                                                fontSize = 9.sp,
-                                                                fontWeight = FontWeight.Bold,
-                                                                color = AmberGold,
-                                                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
-                                                            )
-                                                        }
-                                                    }
-                                                }
-                                                Text(
-                                                    text = "${option.format} • ${option.fps}fps",
-                                                    style = MaterialTheme.typography.labelSmall,
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                                )
-                                            }
-                                        }
-
-                                        Text(
-                                            text = "~${option.sizeEstimatedMb} MB",
-                                            fontWeight = FontWeight.SemiBold,
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = EmeraldCyan
-                                        )
-                                    }
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                        contentDescription = "Back",
+                                        tint = Color.White
+                                    )
                                 }
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = "Download",
+                                    color = Color.White,
+                                    fontSize = 20.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+
+                            TextButton(
+                                onClick = {
+                                    val isAudio = selectedMediaType == 1
+                                    onStartDownload(isAudio, fileName, threadCount.roundToInt())
+                                },
+                                modifier = Modifier.testTag("download_dialog_okay_button")
+                            ) {
+                                Text(
+                                    text = "OKAY",
+                                    color = Color.White,
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
                             }
                         }
                     }
-                } else {
-                    // Audio Tracks (Multi-Language with Bangla Priority Default)
-                    LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        items(videoDetails.audioTracks) { track ->
-                            val isSelected = selectedAudioOption?.id == track.id
-                            val isBangla = track.languageCode.startsWith("bn")
 
-                            Surface(
-                                onClick = { onAudioOptionSelected(track) },
-                                shape = RoundedCornerShape(12.dp),
-                                color = if (isSelected) {
-                                    if (isBangla) EmeraldCyan.copy(alpha = 0.15f) else CrimsonRed.copy(alpha = 0.12f)
-                                } else MaterialTheme.colorScheme.surfaceVariant,
-                                border = BorderStroke(
-                                    1.dp,
-                                    if (isSelected) {
-                                        if (isBangla) EmeraldCyan else CrimsonRed
-                                    } else MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
+                    // Content Area
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 22.dp, vertical = 18.dp)
+                    ) {
+                        // File name label
+                        Text(
+                            text = "File name",
+                            color = DialogTextSecondary,
+                            fontSize = 14.sp
+                        )
+
+                        Spacer(modifier = Modifier.height(4.dp))
+
+                        // File name input field (underlined style matching screenshot)
+                        val customTextSelectionColors = TextSelectionColors(
+                            handleColor = HeaderRed,
+                            backgroundColor = HeaderRed.copy(alpha = 0.4f)
+                        )
+                        CompositionLocalProvider(LocalTextSelectionColors provides customTextSelectionColors) {
+                            TextField(
+                                value = fileName,
+                                onValueChange = { fileName = it },
+                                singleLine = false,
+                                maxLines = 3,
+                                textStyle = MaterialTheme.typography.bodyMedium.copy(
+                                    color = Color.White,
+                                    fontSize = 14.sp,
+                                    lineHeight = 20.sp
+                                ),
+                                colors = TextFieldDefaults.colors(
+                                    focusedContainerColor = Color.Transparent,
+                                    unfocusedContainerColor = Color.Transparent,
+                                    disabledContainerColor = Color.Transparent,
+                                    focusedIndicatorColor = HeaderRed,
+                                    unfocusedIndicatorColor = Color.LightGray.copy(alpha = 0.5f),
+                                    cursorColor = HeaderRed
                                 ),
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .testTag("audio_track_${track.id}")
+                                    .testTag("download_file_name_input")
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(18.dp))
+
+                        // Radio Button Group: Video | Audio | Captions
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Start
+                        ) {
+                            // Video Radio
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .clickable {
+                                        selectedMediaType = 0
+                                        onTabSelected(0)
+                                    }
+                                    .testTag("radio_media_video")
                             ) {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 14.dp, vertical = 10.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween
-                                ) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        modifier = Modifier.weight(1f)
-                                    ) {
-                                        RadioButton(
-                                            selected = isSelected,
-                                            onClick = { onAudioOptionSelected(track) },
-                                            colors = RadioButtonDefaults.colors(
-                                                selectedColor = if (isBangla) EmeraldCyan else CrimsonRed
-                                            )
-                                        )
-                                        Spacer(modifier = Modifier.width(6.dp))
-                                        Column {
-                                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                                Text(
-                                                    text = track.languageName,
-                                                    fontWeight = if (isBangla) FontWeight.ExtraBold else FontWeight.SemiBold,
-                                                    style = MaterialTheme.typography.bodyMedium,
-                                                    color = if (isBangla && isSelected) EmeraldCyan else MaterialTheme.colorScheme.onSurface
-                                                )
-                                                if (isBangla) {
-                                                    Spacer(modifier = Modifier.width(6.dp))
-                                                    Surface(
-                                                        color = CrimsonRed.copy(alpha = 0.2f),
-                                                        shape = RoundedCornerShape(4.dp)
-                                                    ) {
-                                                        Text(
-                                                            text = "১ম ডিফল্ট বাংলা",
-                                                            fontSize = 9.sp,
-                                                            fontWeight = FontWeight.Bold,
-                                                            color = CrimsonRed,
-                                                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
-                                                        )
-                                                    }
-                                                } else if (track.languageCode == "hi") {
-                                                    Spacer(modifier = Modifier.width(6.dp))
-                                                    Surface(
-                                                        color = AmberGold.copy(alpha = 0.2f),
-                                                        shape = RoundedCornerShape(4.dp)
-                                                    ) {
-                                                        Text(
-                                                            text = "২য় হিন্দি",
-                                                            fontSize = 9.sp,
-                                                            fontWeight = FontWeight.Bold,
-                                                            color = AmberGold,
-                                                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
-                                                        )
-                                                    }
-                                                } else if (track.languageCode == "orig" || track.languageCode == "en") {
-                                                    Spacer(modifier = Modifier.width(6.dp))
-                                                    Surface(
-                                                        color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
-                                                        shape = RoundedCornerShape(4.dp)
-                                                    ) {
-                                                        Text(
-                                                            text = "৩য় অরিজিনাল",
-                                                            fontSize = 9.sp,
-                                                            fontWeight = FontWeight.Bold,
-                                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
-                                                        )
-                                                    }
-                                                }
-                                            }
+                                RadioButton(
+                                    selected = selectedMediaType == 0,
+                                    onClick = {
+                                        selectedMediaType = 0
+                                        onTabSelected(0)
+                                    },
+                                    colors = RadioButtonDefaults.colors(
+                                        selectedColor = Color.White,
+                                        unselectedColor = Color.LightGray
+                                    )
+                                )
+                                Text(
+                                    text = "Video",
+                                    color = Color.White,
+                                    fontSize = 14.sp,
+                                    fontWeight = if (selectedMediaType == 0) FontWeight.SemiBold else FontWeight.Normal
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.width(14.dp))
+
+                            // Audio Radio
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .clickable {
+                                        selectedMediaType = 1
+                                        onTabSelected(1)
+                                    }
+                                    .testTag("radio_media_audio")
+                            ) {
+                                RadioButton(
+                                    selected = selectedMediaType == 1,
+                                    onClick = {
+                                        selectedMediaType = 1
+                                        onTabSelected(1)
+                                    },
+                                    colors = RadioButtonDefaults.colors(
+                                        selectedColor = Color.White,
+                                        unselectedColor = Color.LightGray
+                                    )
+                                )
+                                Text(
+                                    text = "Audio",
+                                    color = Color.White,
+                                    fontSize = 14.sp,
+                                    fontWeight = if (selectedMediaType == 1) FontWeight.SemiBold else FontWeight.Normal
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.width(14.dp))
+
+                            // Captions Radio
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .clickable {
+                                        selectedMediaType = 2
+                                        onTabSelected(2)
+                                    }
+                                    .testTag("radio_media_captions")
+                            ) {
+                                RadioButton(
+                                    selected = selectedMediaType == 2,
+                                    onClick = {
+                                        selectedMediaType = 2
+                                        onTabSelected(2)
+                                    },
+                                    colors = RadioButtonDefaults.colors(
+                                        selectedColor = Color.White,
+                                        unselectedColor = Color.LightGray
+                                    )
+                                )
+                                Text(
+                                    text = "Captions",
+                                    color = Color.White,
+                                    fontSize = 14.sp,
+                                    fontWeight = if (selectedMediaType == 2) FontWeight.SemiBold else FontWeight.Normal
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        // Stream / Quality Selection Dropdown Trigger
+                        Surface(
+                            onClick = { showStreamSelectorMenu = true },
+                            color = Color.Transparent,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("stream_quality_dropdown_trigger")
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 8.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                // Left details (Format and Quality / Resolution / Language)
+                                Column(modifier = Modifier.weight(1f)) {
+                                    when (selectedMediaType) {
+                                        0 -> {
                                             Text(
-                                                text = "${track.format} • ${track.bitrateKbps} kbps",
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                text = currentVideo?.format ?: "MPEG-4",
+                                                color = DialogTextSecondary,
+                                                fontSize = 13.sp
+                                            )
+                                            Text(
+                                                text = currentVideo?.qualityLabel ?: "480p SD",
+                                                color = Color.White,
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 15.sp
+                                            )
+                                        }
+                                        1 -> {
+                                            Text(
+                                                text = currentAudio?.format ?: "M4A / AAC",
+                                                color = DialogTextSecondary,
+                                                fontSize = 13.sp
+                                            )
+                                            Text(
+                                                text = currentAudio?.languageName ?: "বাংলা (Bengali)",
+                                                color = Color.White,
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 15.sp
+                                            )
+                                        }
+                                        else -> {
+                                            Text(
+                                                text = selectedCaption.format,
+                                                color = DialogTextSecondary,
+                                                fontSize = 13.sp
+                                            )
+                                            Text(
+                                                text = selectedCaption.languageName,
+                                                color = Color.White,
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 15.sp
                                             )
                                         }
                                     }
+                                }
 
+                                // Right details (File size and Dropdown arrow)
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    val sizeText = when (selectedMediaType) {
+                                        0 -> "${currentVideo?.sizeEstimatedMb ?: 14.8} MB"
+                                        1 -> "${currentAudio?.sizeEstimatedMb ?: 5.6} MB"
+                                        else -> "${selectedCaption.sizeEstimatedMb} MB"
+                                    }
                                     Text(
-                                        text = "~${track.sizeEstimatedMb} MB",
-                                        fontWeight = FontWeight.SemiBold,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = EmeraldCyan
+                                        text = sizeText,
+                                        color = DialogTextSecondary,
+                                        fontSize = 14.sp
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Icon(
+                                        imageVector = Icons.Default.ArrowDropDown,
+                                        contentDescription = "Select Quality",
+                                        tint = DialogTextSecondary,
+                                        modifier = Modifier.size(24.dp)
                                     )
                                 }
                             }
                         }
+
+                        Spacer(modifier = Modifier.height(14.dp))
+
+                        // Threads Slider
+                        Text(
+                            text = "Threads",
+                            color = DialogTextSecondary,
+                            fontSize = 14.sp
+                        )
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "${threadCount.roundToInt()}",
+                                color = Color.White,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.width(28.dp)
+                            )
+                            Slider(
+                                value = threadCount,
+                                onValueChange = { threadCount = it },
+                                valueRange = 1f..8f,
+                                steps = 6,
+                                colors = SliderDefaults.colors(
+                                    thumbColor = Color.White,
+                                    activeTrackColor = Color.LightGray,
+                                    inactiveTrackColor = Color.DarkGray
+                                ),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("download_threads_slider")
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(14.dp))
+
+                        // Centered Disclaimer / Helper note
+                        Text(
+                            text = "Streams which are not yet supported by the downloader are not shown",
+                            color = Color.Gray,
+                            fontSize = 11.sp,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp)
+                        )
                     }
                 }
             }
+        }
+    }
 
-            Spacer(modifier = Modifier.height(18.dp))
-
-            // Action Buttons: Stream Directly or Download
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                // Play directly button
-                OutlinedButton(
-                    onClick = { onPlayDirectStream(selectedTab == 1) },
-                    shape = RoundedCornerShape(12.dp),
-                    border = BorderStroke(1.dp, EmeraldCyan),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = EmeraldCyan),
+    // Modal / Dialog for Stream Selection
+    if (showStreamSelectorMenu) {
+        AlertDialog(
+            onDismissRequest = { showStreamSelectorMenu = false },
+            containerColor = Color(0xFF222222),
+            title = {
+                Text(
+                    text = when (selectedMediaType) {
+                        0 -> "Select Video Resolution"
+                        1 -> "Select Audio Track (বাংলা / হিন্দি / অরিজিনাল)"
+                        else -> "Select Captions"
+                    },
+                    color = Color.White,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Column(
                     modifier = Modifier
-                        .weight(1f)
-                        .height(48.dp)
-                        .testTag("stream_direct_button")
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Icon(imageVector = Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(text = "সরাসরি শুনুন", fontWeight = FontWeight.Bold)
+                    when (selectedMediaType) {
+                        0 -> {
+                            videoDetails.videoStreams.forEach { option ->
+                                val isSelected = currentVideo?.id == option.id
+                                Surface(
+                                    onClick = {
+                                        onVideoOptionSelected(option)
+                                        showStreamSelectorMenu = false
+                                    },
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = if (isSelected) HeaderRed.copy(alpha = 0.25f) else Color(0xFF2E2E2E),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Column {
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Text(
+                                                    text = option.qualityLabel,
+                                                    color = Color.White,
+                                                    fontWeight = FontWeight.Bold,
+                                                    fontSize = 14.sp
+                                                )
+                                                if (option.resolutionHeight == 480 || option.qualityLabel.contains("480p")) {
+                                                    Spacer(modifier = Modifier.width(6.dp))
+                                                    Text(
+                                                        text = "(Default)",
+                                                        color = HeaderRed,
+                                                        fontSize = 11.sp,
+                                                        fontWeight = FontWeight.Bold
+                                                    )
+                                                }
+                                            }
+                                            Text(
+                                                text = "${option.format} • ${option.fps}fps",
+                                                color = DialogTextSecondary,
+                                                fontSize = 12.sp
+                                            )
+                                        }
+
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Text(
+                                                text = "${option.sizeEstimatedMb} MB",
+                                                color = DialogTextSecondary,
+                                                fontSize = 12.sp
+                                            )
+                                            if (isSelected) {
+                                                Spacer(modifier = Modifier.width(8.dp))
+                                                Icon(
+                                                    imageVector = Icons.Default.Check,
+                                                    contentDescription = null,
+                                                    tint = Color.White,
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        1 -> {
+                            videoDetails.audioTracks.forEach { track ->
+                                val isSelected = currentAudio?.id == track.id
+                                Surface(
+                                    onClick = {
+                                        onAudioOptionSelected(track)
+                                        showStreamSelectorMenu = false
+                                    },
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = if (isSelected) HeaderRed.copy(alpha = 0.25f) else Color(0xFF2E2E2E),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                text = track.languageName,
+                                                color = Color.White,
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 14.sp
+                                            )
+                                            Text(
+                                                text = "${track.format} • ${track.bitrateKbps} kbps",
+                                                color = DialogTextSecondary,
+                                                fontSize = 12.sp
+                                            )
+                                        }
+
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Text(
+                                                text = "${track.sizeEstimatedMb} MB",
+                                                color = DialogTextSecondary,
+                                                fontSize = 12.sp
+                                            )
+                                            if (isSelected) {
+                                                Spacer(modifier = Modifier.width(8.dp))
+                                                Icon(
+                                                    imageVector = Icons.Default.Check,
+                                                    contentDescription = null,
+                                                    tint = Color.White,
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        else -> {
+                            sampleCaptions.forEach { caption ->
+                                val isSelected = selectedCaption.id == caption.id
+                                Surface(
+                                    onClick = {
+                                        selectedCaption = caption
+                                        showStreamSelectorMenu = false
+                                    },
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = if (isSelected) HeaderRed.copy(alpha = 0.25f) else Color(0xFF2E2E2E),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Text(
+                                            text = caption.languageName,
+                                            color = Color.White,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 14.sp
+                                        )
+                                        if (isSelected) {
+                                            Icon(
+                                                imageVector = Icons.Default.Check,
+                                                contentDescription = null,
+                                                tint = Color.White,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
-
-                // Download button
-                Button(
-                    onClick = { onStartDownload(selectedTab == 1) },
-                    shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = CrimsonRed),
-                    modifier = Modifier
-                        .weight(1.3f)
-                        .height(48.dp)
-                        .testTag("download_now_button")
-                ) {
-                    Icon(imageVector = Icons.Default.Download, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = if (selectedTab == 0) "ভিডিও ডাউনলোড" else "বাংলা অডিও ডাউনলোড",
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White
-                    )
+            },
+            confirmButton = {
+                TextButton(onClick = { showStreamSelectorMenu = false }) {
+                    Text("OK", color = Color.White, fontWeight = FontWeight.Bold)
                 }
             }
-        }
+        )
     }
 }

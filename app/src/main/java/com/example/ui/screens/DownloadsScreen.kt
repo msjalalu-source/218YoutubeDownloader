@@ -2,10 +2,12 @@ package com.example.ui.screens
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -18,12 +20,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.local.MediaEntity
 import com.example.ui.components.MediaItemCard
-import com.example.ui.theme.CrimsonRed
-import com.example.ui.theme.EmeraldCyan
+import com.example.ui.theme.YouTubeRed
 
 @Composable
 fun DownloadsScreen(
@@ -39,7 +41,7 @@ fun DownloadsScreen(
     modifier: Modifier = Modifier
 ) {
     var selectedFilterIndex by remember { mutableStateOf(0) }
-    val filters = listOf("সব অফলাইন", "অডিও গান", "ভিডিও", "প্রিয় গান")
+    val filters = listOf("সবগুলো", "অডিও গান (MP3)", "ভিডিও (MP4)", "পছন্দনীয় গান")
 
     val filteredList = when (selectedFilterIndex) {
         1 -> completedDownloads.filter { it.mediaType == "AUDIO" }
@@ -51,25 +53,75 @@ fun DownloadsScreen(
     LazyColumn(
         modifier = modifier
             .fillMaxSize()
-            .padding(horizontal = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
+            .background(MaterialTheme.colorScheme.background)
+            .padding(horizontal = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
         contentPadding = PaddingValues(bottom = 90.dp, top = 8.dp)
     ) {
-        // Active Downloads Section
+        // YouTube-style Library Storage Overview Card
+        item {
+            Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(34.dp)
+                                    .background(YouTubeRed.copy(alpha = 0.15f), CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.DownloadDone,
+                                    contentDescription = null,
+                                    tint = YouTubeRed,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column {
+                                Text(
+                                    text = "ডাউনলোড ও অফলাইন লাইব্রেরি",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 14.sp,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = "কোনো ডেটা বা বিজ্ঞাপন ছাড়াই উপভোগ করুন",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+
+                        Text(
+                            text = "${completedDownloads.size} আইটেম",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = YouTubeRed
+                        )
+                    }
+                }
+            }
+        }
+
+        // Active Downloads Section if any
         if (activeDownloads.isNotEmpty()) {
             item {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "ডাউনলোড প্রক্রিয়াধীন (${activeDownloads.size})",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = EmeraldCyan
-                    )
-                }
+                Text(
+                    text = "ডাউনলোড হচ্ছে (${activeDownloads.size})",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = YouTubeRed,
+                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                )
             }
 
             items(activeDownloads) { media ->
@@ -85,28 +137,7 @@ fun DownloadsScreen(
             }
         }
 
-        // Offline Library Header
-        item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "সংরক্ষিত অফলাইন মিডিয়া",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                Text(
-                    text = "${completedDownloads.size}টি আইটেম",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        }
-
-        // Filter Pills
+        // Filter Chips Row
         item {
             LazyRow(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -114,16 +145,26 @@ fun DownloadsScreen(
             ) {
                 items(filters.indices.toList()) { index ->
                     val isSelected = selectedFilterIndex == index
-                    FilterChip(
-                        selected = isSelected,
+                    Surface(
                         onClick = { selectedFilterIndex = index },
-                        label = { Text(filters[index], fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal) },
-                        colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = CrimsonRed,
-                            selectedLabelColor = Color.White
-                        ),
-                        modifier = Modifier.testTag("download_filter_$index")
-                    )
+                        shape = RoundedCornerShape(8.dp),
+                        color = if (isSelected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.surfaceVariant,
+                        modifier = Modifier
+                            .height(32.dp)
+                            .testTag("download_filter_$index")
+                    ) {
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier.padding(horizontal = 12.dp)
+                        ) {
+                            Text(
+                                text = filters[index],
+                                color = if (isSelected) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.onSurface,
+                                fontSize = 12.sp,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -134,40 +175,43 @@ fun DownloadsScreen(
                 Surface(
                     color = MaterialTheme.colorScheme.surfaceVariant,
                     shape = RoundedCornerShape(16.dp),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)),
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp)
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 24.dp)
                 ) {
                     Column(
                         modifier = Modifier.padding(24.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         Icon(
-                            imageVector = Icons.Default.DownloadDone,
+                            imageVector = Icons.Outlined.VideoLibrary,
                             contentDescription = null,
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(48.dp)
+                            modifier = Modifier.size(54.dp)
                         )
                         Spacer(modifier = Modifier.height(12.dp))
                         Text(
                             text = "কোনো অফলাইন মিডিয়া ডাউনলোড নেই",
-                            style = MaterialTheme.typography.titleSmall,
+                            style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.onSurface
                         )
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(
-                            text = "ইউটিউব বা সাউন্ডক্লাউড লিংক কপি করে অ্যাপে আসলেই স্বয়ংক্রিয় ডাউনলোডের অপশন আসবে।",
+                            text = "হোম পেজের যেকোনো ভিডিওতে ডাউনলোড আইকনে চাপ দিন বা লিংক পেস্ট করুন।",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                            textAlign = TextAlign.Center
                         )
                         Spacer(modifier = Modifier.height(16.dp))
                         Button(
                             onClick = onNavigateToHome,
-                            shape = RoundedCornerShape(10.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = CrimsonRed)
+                            shape = RoundedCornerShape(18.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = YouTubeRed)
                         ) {
-                            Text("হোম পেজে যান", color = Color.White, fontWeight = FontWeight.Bold)
+                            Icon(Icons.Default.Home, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("ইউটিউব হোমে যান", color = Color.White, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
@@ -181,7 +225,7 @@ fun DownloadsScreen(
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        text = "এই ফিল্টারে কোনো সংরক্ষিত মিডিয়া পাওয়া যায়নি",
+                        text = "এই ফিল্টারে কোনো অফলাইন মিডিয়া নেই",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

@@ -30,9 +30,7 @@ import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
 import com.example.data.service.MediaExtractorService
 import com.example.player.PlaybackState
-import com.example.ui.theme.AmberGold
-import com.example.ui.theme.CrimsonRed
-import com.example.ui.theme.EmeraldCyan
+import com.example.ui.theme.YouTubeRed
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -79,7 +77,7 @@ fun FullScreenPlayerDialog(
 
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(
-                            text = if (media.mediaType == "VIDEO") "ভিডিও সরাসরি স্ট্রিম" else "অফলাইন লিসেনিং ও মিউজিক",
+                            text = if (media.mediaType == "VIDEO") "ভিডিও সরাসরি প্লেয়ার" else "অডিও স্ট্রিম ও গান",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -87,7 +85,7 @@ fun FullScreenPlayerDialog(
                             text = media.selectedQuality,
                             style = MaterialTheme.typography.labelMedium,
                             fontWeight = FontWeight.Bold,
-                            color = EmeraldCyan
+                            color = YouTubeRed
                         )
                     }
 
@@ -95,7 +93,7 @@ fun FullScreenPlayerDialog(
                         Icon(
                             imageVector = Icons.Default.Language,
                             contentDescription = "Audio Track",
-                            tint = EmeraldCyan
+                            tint = YouTubeRed
                         )
                     }
                 }
@@ -105,17 +103,17 @@ fun FullScreenPlayerDialog(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(paddingValues)
-                    .padding(horizontal = 24.dp, vertical = 8.dp),
+                    .padding(horizontal = 20.dp, vertical = 8.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.SpaceBetween
             ) {
-                // Media Canvas / Artwork / Visualizer
+                // Media Canvas / Artwork / Visualizer (16:9 for Video, square for Audio)
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .weight(1f)
-                        .padding(vertical = 12.dp)
-                        .clip(RoundedCornerShape(20.dp))
+                        .padding(vertical = 10.dp)
+                        .clip(RoundedCornerShape(16.dp))
                         .background(Color.Black),
                     contentAlignment = Alignment.Center
                 ) {
@@ -167,9 +165,9 @@ fun FullScreenPlayerDialog(
 
                     // Audio Track Tag
                     Surface(
-                        color = EmeraldCyan.copy(alpha = 0.15f),
+                        color = YouTubeRed.copy(alpha = 0.15f),
                         shape = RoundedCornerShape(20.dp),
-                        border = BorderStroke(1.dp, EmeraldCyan.copy(alpha = 0.5f)),
+                        border = BorderStroke(1.dp, YouTubeRed.copy(alpha = 0.4f)),
                         modifier = Modifier.clickable { showTrackSelector = true }
                     ) {
                         Row(
@@ -179,7 +177,7 @@ fun FullScreenPlayerDialog(
                             Icon(
                                 imageVector = Icons.Default.VolumeUp,
                                 contentDescription = null,
-                                tint = EmeraldCyan,
+                                tint = YouTubeRed,
                                 modifier = Modifier.size(14.dp)
                             )
                             Spacer(modifier = Modifier.width(6.dp))
@@ -187,22 +185,22 @@ fun FullScreenPlayerDialog(
                                 text = "অডিও ট্র্যাক: ${playbackState.selectedAudioTrackName}",
                                 style = MaterialTheme.typography.labelSmall,
                                 fontWeight = FontWeight.Bold,
-                                color = EmeraldCyan
+                                color = YouTubeRed
                             )
                             Spacer(modifier = Modifier.width(4.dp))
                             Icon(
                                 imageVector = Icons.Default.ArrowDropDown,
                                 contentDescription = null,
-                                tint = EmeraldCyan,
+                                tint = YouTubeRed,
                                 modifier = Modifier.size(16.dp)
                             )
                         }
                     }
                 }
 
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(14.dp))
 
-                // Seek Bar & Timers
+                // Seek Bar & Timers (YouTube Red Seekbar)
                 Column(modifier = Modifier.fillMaxWidth()) {
                     val currentPos = playbackState.currentPositionMs
                     val totalDuration = playbackState.durationMs.coerceAtLeast(1000L)
@@ -214,8 +212,8 @@ fun FullScreenPlayerDialog(
                             onSeekTo((frac * totalDuration).toLong())
                         },
                         colors = SliderDefaults.colors(
-                            thumbColor = CrimsonRed,
-                            activeTrackColor = CrimsonRed,
+                            thumbColor = YouTubeRed,
+                            activeTrackColor = YouTubeRed,
                             inactiveTrackColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
                         ),
                         modifier = Modifier.fillMaxWidth().testTag("player_seek_slider")
@@ -238,7 +236,7 @@ fun FullScreenPlayerDialog(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(10.dp))
 
                 // Primary Playback Controls
                 Row(
@@ -250,7 +248,7 @@ fun FullScreenPlayerDialog(
                         Icon(
                             imageVector = Icons.Default.Shuffle,
                             contentDescription = "Shuffle",
-                            tint = if (playbackState.isShuffle) EmeraldCyan else MaterialTheme.colorScheme.onSurfaceVariant
+                            tint = if (playbackState.isShuffle) YouTubeRed else MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
 
@@ -275,7 +273,7 @@ fun FullScreenPlayerDialog(
                     // Main Play/Pause Button
                     FilledIconButton(
                         onClick = onTogglePlayPause,
-                        colors = IconButtonDefaults.filledIconButtonColors(containerColor = CrimsonRed),
+                        colors = IconButtonDefaults.filledIconButtonColors(containerColor = YouTubeRed),
                         modifier = Modifier
                             .size(64.dp)
                             .testTag("fullscreen_play_pause")
@@ -310,14 +308,14 @@ fun FullScreenPlayerDialog(
                         Icon(
                             imageVector = Icons.Default.Repeat,
                             contentDescription = "Loop",
-                            tint = if (playbackState.isLooping) EmeraldCyan else MaterialTheme.colorScheme.onSurfaceVariant
+                            tint = if (playbackState.isLooping) YouTubeRed else MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }
 
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(14.dp))
 
-                // Bottom Utilities: Speed Badge, Sleep Timer
+                // Bottom Utilities: Speed Badge
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.Center,
@@ -331,7 +329,7 @@ fun FullScreenPlayerDialog(
                     )
                 }
 
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(10.dp))
             }
         }
     }
@@ -357,7 +355,7 @@ fun FullScreenPlayerDialog(
                                 showTrackSelector = false
                             },
                             shape = RoundedCornerShape(8.dp),
-                            color = if (isSelected) EmeraldCyan.copy(alpha = 0.15f) else Color.Transparent,
+                            color = if (isSelected) YouTubeRed.copy(alpha = 0.15f) else Color.Transparent,
                             modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
                         ) {
                             Row(
@@ -370,13 +368,13 @@ fun FullScreenPlayerDialog(
                                         onAudioTrackChange(track)
                                         showTrackSelector = false
                                     },
-                                    colors = RadioButtonDefaults.colors(selectedColor = EmeraldCyan)
+                                    colors = RadioButtonDefaults.colors(selectedColor = YouTubeRed)
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
                                     text = track,
                                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                    color = if (isSelected) EmeraldCyan else MaterialTheme.colorScheme.onSurface
+                                    color = if (isSelected) YouTubeRed else MaterialTheme.colorScheme.onSurface
                                 )
                             }
                         }
@@ -385,7 +383,7 @@ fun FullScreenPlayerDialog(
             },
             confirmButton = {
                 TextButton(onClick = { showTrackSelector = false }) {
-                    Text("ঠিক আছে")
+                    Text("ঠিক আছে", color = YouTubeRed)
                 }
             }
         )
@@ -416,7 +414,7 @@ fun FullScreenPlayerDialog(
             },
             confirmButton = {
                 TextButton(onClick = { showSpeedSelector = false }) {
-                    Text("বন্ধ করুন")
+                    Text("বন্ধ করুন", color = YouTubeRed)
                 }
             }
         )
@@ -448,7 +446,7 @@ fun AnimatedAudioWave(modifier: Modifier = Modifier) {
                 modifier = Modifier
                     .width(4.dp)
                     .height(heightAnim.value.dp)
-                    .background(EmeraldCyan, CircleShape)
+                    .background(YouTubeRed, CircleShape)
             )
         }
     }

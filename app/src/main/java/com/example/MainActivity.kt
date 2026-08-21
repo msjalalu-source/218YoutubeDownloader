@@ -17,6 +17,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -38,11 +40,9 @@ import com.example.ui.components.MiniPlayerBar
 import com.example.ui.components.QuickDownloadBottomSheet
 import com.example.ui.screens.DownloadsScreen
 import com.example.ui.screens.HomeScreen
-import com.example.ui.screens.PlaylistsScreen
 import com.example.ui.screens.SettingsScreen
-import com.example.ui.theme.CrimsonRed
-import com.example.ui.theme.EmeraldCyan
 import com.example.ui.theme.MyApplicationTheme
+import com.example.ui.theme.YouTubeRed
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -95,54 +95,94 @@ fun BDTubeMainApp(viewModel: MainViewModel) {
         topBar = {
             TopAppBar(
                 title = {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .size(32.dp)
-                                .background(CrimsonRed, RoundedCornerShape(8.dp)),
-                            contentAlignment = Alignment.Center
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.clickable { viewModel.setTab(0) }
+                    ) {
+                        // Official YouTube Play Button Logo Pill
+                        Surface(
+                            color = YouTubeRed,
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.size(width = 32.dp, height = 24.dp)
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.PlayArrow,
-                                contentDescription = null,
-                                tint = Color.White,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Column {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    text = "BDTube",
-                                    fontWeight = FontWeight.Black,
-                                    fontSize = 18.sp,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                                Text(
-                                    text = "PRO",
-                                    fontWeight = FontWeight.Black,
-                                    fontSize = 10.sp,
-                                    color = CrimsonRed,
-                                    modifier = Modifier.padding(start = 4.dp)
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Default.PlayArrow,
+                                    contentDescription = "YouTube Logo",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(16.dp)
                                 )
                             }
-                            Text(
-                                text = "বিজ্ঞাপনহীন সরাসরি স্ট্রিমার ও ডাউনলোডার",
-                                fontSize = 10.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
                         }
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "BDTube",
+                            fontWeight = FontWeight.Black,
+                            fontSize = 19.sp,
+                            letterSpacing = (-0.5).sp,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = "BD",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 10.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier
+                                .align(Alignment.Top)
+                                .padding(start = 2.dp, top = 2.dp)
+                        )
                     }
                 },
                 actions = {
+                    // YouTube Cast Icon
+                    IconButton(onClick = { }) {
+                        Icon(
+                            imageVector = Icons.Default.Cast,
+                            contentDescription = "Cast",
+                            tint = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+
+                    // YouTube Notification Bell
+                    IconButton(onClick = { }) {
+                        Icon(
+                            imageVector = Icons.Outlined.Notifications,
+                            contentDescription = "Notifications",
+                            tint = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+
+                    // YouTube Search Icon
                     IconButton(
-                        onClick = { viewModel.checkClipboardForMediaLink(context) },
-                        modifier = Modifier.testTag("top_bar_clipboard_check")
+                        onClick = { viewModel.setTab(0) },
+                        modifier = Modifier.testTag("top_bar_search_icon")
                     ) {
                         Icon(
-                            imageVector = Icons.Default.ContentPaste,
-                            contentDescription = "Check Clipboard",
-                            tint = EmeraldCyan
+                            imageVector = Icons.Default.Search,
+                            contentDescription = "Search",
+                            tint = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+
+                    // YouTube Profile Avatar Circle
+                    Box(
+                        modifier = Modifier
+                            .padding(end = 12.dp, start = 4.dp)
+                            .size(30.dp)
+                            .clip(CircleShape)
+                            .background(
+                                Brush.linearGradient(
+                                    colors = listOf(YouTubeRed, Color(0xFF8A0000))
+                                )
+                            )
+                            .clickable { viewModel.setTab(2) },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "B",
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp
                         )
                     }
                 },
@@ -153,7 +193,7 @@ fun BDTubeMainApp(viewModel: MainViewModel) {
         },
         bottomBar = {
             Column {
-                // Mini Player Bar if something is loaded
+                // YouTube Mini Player Bar if something is currently active
                 if (playbackState.currentMedia != null) {
                     MiniPlayerBar(
                         playbackState = playbackState,
@@ -164,25 +204,31 @@ fun BDTubeMainApp(viewModel: MainViewModel) {
                     )
                 }
 
-                // Bottom Navigation Bar
+                // Authentic YouTube Bottom Navigation Bar
                 NavigationBar(
                     containerColor = MaterialTheme.colorScheme.surface,
-                    tonalElevation = 3.dp
+                    tonalElevation = 0.dp
                 ) {
                     NavigationBarItem(
                         selected = uiState.selectedTab == 0,
                         onClick = { viewModel.setTab(0) },
                         icon = {
                             Icon(
-                                imageVector = if (uiState.selectedTab == 0) Icons.Default.Home else Icons.Outlined.Home,
+                                imageVector = if (uiState.selectedTab == 0) Icons.Filled.Home else Icons.Outlined.Home,
                                 contentDescription = "Home"
                             )
                         },
-                        label = { Text("হোম", fontSize = 11.sp, fontWeight = if (uiState.selectedTab == 0) FontWeight.Bold else FontWeight.Normal) },
+                        label = {
+                            Text(
+                                text = "হোম",
+                                fontSize = 10.sp,
+                                fontWeight = if (uiState.selectedTab == 0) FontWeight.Bold else FontWeight.Normal
+                            )
+                        },
                         colors = NavigationBarItemDefaults.colors(
-                            selectedIconColor = MaterialTheme.colorScheme.primary,
-                            selectedTextColor = MaterialTheme.colorScheme.primary,
-                            indicatorColor = MaterialTheme.colorScheme.primaryContainer,
+                            selectedIconColor = MaterialTheme.colorScheme.onSurface,
+                            selectedTextColor = MaterialTheme.colorScheme.onSurface,
+                            indicatorColor = Color.Transparent,
                             unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
                             unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant
                         ),
@@ -196,23 +242,29 @@ fun BDTubeMainApp(viewModel: MainViewModel) {
                             BadgedBox(
                                 badge = {
                                     if (activeDownloads.isNotEmpty()) {
-                                        Badge(containerColor = MaterialTheme.colorScheme.primary) {
-                                            Text("${activeDownloads.size}", color = MaterialTheme.colorScheme.onPrimary)
+                                        Badge(containerColor = YouTubeRed) {
+                                            Text("${activeDownloads.size}", color = Color.White)
                                         }
                                     }
                                 }
                             ) {
                                 Icon(
-                                    imageVector = if (uiState.selectedTab == 1) Icons.Default.Download else Icons.Outlined.Download,
+                                    imageVector = if (uiState.selectedTab == 1) Icons.Filled.Download else Icons.Outlined.Download,
                                     contentDescription = "Downloads"
                                 )
                             }
                         },
-                        label = { Text("ডাউনলোড", fontSize = 11.sp, fontWeight = if (uiState.selectedTab == 1) FontWeight.Bold else FontWeight.Normal) },
+                        label = {
+                            Text(
+                                text = "ডাউনলোড",
+                                fontSize = 10.sp,
+                                fontWeight = if (uiState.selectedTab == 1) FontWeight.Bold else FontWeight.Normal
+                            )
+                        },
                         colors = NavigationBarItemDefaults.colors(
-                            selectedIconColor = MaterialTheme.colorScheme.primary,
-                            selectedTextColor = MaterialTheme.colorScheme.primary,
-                            indicatorColor = MaterialTheme.colorScheme.primaryContainer,
+                            selectedIconColor = MaterialTheme.colorScheme.onSurface,
+                            selectedTextColor = MaterialTheme.colorScheme.onSurface,
+                            indicatorColor = Color.Transparent,
                             unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
                             unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant
                         ),
@@ -224,35 +276,21 @@ fun BDTubeMainApp(viewModel: MainViewModel) {
                         onClick = { viewModel.setTab(2) },
                         icon = {
                             Icon(
-                                imageVector = if (uiState.selectedTab == 2) Icons.Default.LibraryMusic else Icons.Outlined.LibraryMusic,
-                                contentDescription = "Playlists"
+                                imageVector = if (uiState.selectedTab == 2) Icons.Filled.AccountCircle else Icons.Outlined.AccountCircle,
+                                contentDescription = "You"
                             )
                         },
-                        label = { Text("প্লেলিস্ট", fontSize = 11.sp, fontWeight = if (uiState.selectedTab == 2) FontWeight.Bold else FontWeight.Normal) },
-                        colors = NavigationBarItemDefaults.colors(
-                            selectedIconColor = MaterialTheme.colorScheme.primary,
-                            selectedTextColor = MaterialTheme.colorScheme.primary,
-                            indicatorColor = MaterialTheme.colorScheme.primaryContainer,
-                            unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                            unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant
-                        ),
-                        modifier = Modifier.testTag("nav_item_playlists")
-                    )
-
-                    NavigationBarItem(
-                        selected = uiState.selectedTab == 3,
-                        onClick = { viewModel.setTab(3) },
-                        icon = {
-                            Icon(
-                                imageVector = if (uiState.selectedTab == 3) Icons.Default.Settings else Icons.Outlined.Settings,
-                                contentDescription = "Settings"
+                        label = {
+                            Text(
+                                text = "আপনি",
+                                fontSize = 10.sp,
+                                fontWeight = if (uiState.selectedTab == 2) FontWeight.Bold else FontWeight.Normal
                             )
                         },
-                        label = { Text("সেটিংস", fontSize = 11.sp, fontWeight = if (uiState.selectedTab == 3) FontWeight.Bold else FontWeight.Normal) },
                         colors = NavigationBarItemDefaults.colors(
-                            selectedIconColor = MaterialTheme.colorScheme.primary,
-                            selectedTextColor = MaterialTheme.colorScheme.primary,
-                            indicatorColor = MaterialTheme.colorScheme.primaryContainer,
+                            selectedIconColor = MaterialTheme.colorScheme.onSurface,
+                            selectedTextColor = MaterialTheme.colorScheme.onSurface,
+                            indicatorColor = Color.Transparent,
                             unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
                             unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant
                         ),
@@ -293,32 +331,7 @@ fun BDTubeMainApp(viewModel: MainViewModel) {
                     onNavigateToHome = { viewModel.setTab(0) }
                 )
 
-                2 -> {
-                    val activePlaylist = uiState.activePlaylistDetail
-                    val playlistMediaList = if (activePlaylist != null) {
-                        viewModel.playbackManager // observe flow dynamically or all media with crossref
-                        completedDownloads
-                    } else emptyList()
-
-                    PlaylistsScreen(
-                        playlists = playlists,
-                        activePlaylistDetail = uiState.activePlaylistDetail,
-                        playlistItems = playlistMediaList,
-                        onOpenCreateDialog = { viewModel.openCreatePlaylistDialog() },
-                        onSelectPlaylist = { viewModel.viewPlaylistDetail(it) },
-                        onClosePlaylistDetail = { viewModel.closePlaylistDetail() },
-                        onDeletePlaylist = { viewModel.deletePlaylist(it) },
-                        onPlayAllInPlaylist = { list ->
-                            if (list.isNotEmpty()) viewModel.playOfflineMedia(list[0], list)
-                        },
-                        onPlayMedia = { media, list -> viewModel.playOfflineMedia(media, list) },
-                        onRemoveMediaFromPlaylist = { pId, mId ->
-                            viewModel.deletePlaylist(pId)
-                        }
-                    )
-                }
-
-                3 -> SettingsScreen(
+                2 -> SettingsScreen(
                     uiState = uiState,
                     onToggleAutoClipboard = { viewModel.toggleAutoClipboard(it) },
                     onToggleBanglaPriority = { viewModel.togglePrioritizeBanglaAudio(it) }
@@ -327,7 +340,7 @@ fun BDTubeMainApp(viewModel: MainViewModel) {
         }
     }
 
-    // Modal: Quick Download & Stream Dialog (with Bengali Track First Priority)
+    // Modal: Quick Download & Stream Dialog (with Bengali Track First Priority & NewPipe Style Dialog)
     if (uiState.showQuickDownloadModal && uiState.extractedVideoDetails != null) {
         QuickDownloadBottomSheet(
             videoDetails = uiState.extractedVideoDetails!!,
@@ -337,7 +350,9 @@ fun BDTubeMainApp(viewModel: MainViewModel) {
             onTabSelected = { viewModel.setSelectedDownloadTab(it) },
             onVideoOptionSelected = { viewModel.selectVideoOption(it) },
             onAudioOptionSelected = { viewModel.selectAudioOption(it) },
-            onStartDownload = { isAudioOnly -> viewModel.startDownloadFromModal(isAudioOnly) },
+            onStartDownload = { isAudioOnly, customTitle, threads ->
+                viewModel.startDownloadFromModal(isAudioOnly, customTitle, threads)
+            },
             onPlayDirectStream = { isAudioOnly -> viewModel.playStreamDirectly(isAudioOnly) },
             onDismiss = { viewModel.dismissDownloadModal() }
         )
@@ -392,7 +407,7 @@ fun BDTubeMainApp(viewModel: MainViewModel) {
                 Button(
                     onClick = { viewModel.createPlaylist(playlistName, playlistDesc) },
                     enabled = playlistName.isNotBlank(),
-                    colors = ButtonDefaults.buttonColors(containerColor = CrimsonRed),
+                    colors = ButtonDefaults.buttonColors(containerColor = YouTubeRed),
                     modifier = Modifier.testTag("submit_create_playlist")
                 ) {
                     Text("তৈরি করুন", color = Color.White)
@@ -430,7 +445,7 @@ fun BDTubeMainApp(viewModel: MainViewModel) {
                                     modifier = Modifier.padding(12.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Icon(Icons.Default.PlaylistPlay, contentDescription = null, tint = EmeraldCyan)
+                                    Icon(Icons.Default.PlaylistPlay, contentDescription = null, tint = YouTubeRed)
                                     Spacer(modifier = Modifier.width(10.dp))
                                     Text(pl.name, fontWeight = FontWeight.SemiBold)
                                 }

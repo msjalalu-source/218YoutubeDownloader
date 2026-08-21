@@ -22,9 +22,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.service.KnownBanglaMediaCatalogue
+import com.example.data.service.MediaExtractorService
 import com.example.ui.MainUiState
 import com.example.ui.components.YouTubeFilterChips
-import com.example.ui.components.YouTubeShortsShelf
 import com.example.ui.components.YouTubeVideoFeedCard
 import com.example.ui.theme.YouTubeRed
 
@@ -40,22 +40,30 @@ fun HomeScreen(
     onClearBanner: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    // Filter videos based on category
+    // Filter videos based on category & adult content restriction
+    val isSearchAdultRestricted = remember(uiState.searchQuery) {
+        MediaExtractorService.isAdultOrRestrictedContent(uiState.searchQuery)
+    }
+
     val allVideos = KnownBanglaMediaCatalogue.sampleTrending
-    val filteredVideos = remember(uiState.activeCategoryFilter, uiState.searchQuery) {
-        allVideos.filter { video ->
-            val matchesCategory = when (uiState.activeCategoryFilter) {
-                "all" -> true
-                "bangla_hits" -> video.category == "bangla_hits"
-                "podcasts" -> video.category == "podcasts"
-                "islamic" -> video.category == "islamic"
-                "soundcloud" -> video.category == "soundcloud"
-                else -> true
+    val filteredVideos = remember(uiState.activeCategoryFilter, uiState.searchQuery, isSearchAdultRestricted) {
+        if (isSearchAdultRestricted) {
+            emptyList()
+        } else {
+            allVideos.filter { video ->
+                val matchesCategory = when (uiState.activeCategoryFilter) {
+                    "all" -> true
+                    "bangla_hits" -> video.category == "bangla_hits"
+                    "podcasts" -> video.category == "podcasts"
+                    "islamic" -> video.category == "islamic"
+                    "soundcloud" -> video.category == "soundcloud"
+                    else -> true
+                }
+                val matchesSearch = uiState.searchQuery.isBlank() ||
+                        video.title.contains(uiState.searchQuery, ignoreCase = true) ||
+                        video.author.contains(uiState.searchQuery, ignoreCase = true)
+                matchesCategory && matchesSearch
             }
-            val matchesSearch = uiState.searchQuery.isBlank() ||
-                    video.title.contains(uiState.searchQuery, ignoreCase = true) ||
-                    video.author.contains(uiState.searchQuery, ignoreCase = true)
-            matchesCategory && matchesSearch
         }
     }
 
@@ -255,41 +263,49 @@ fun HomeScreen(
             )
         }
 
-        // 4. YouTube First Video Card
-        if (filteredVideos.isNotEmpty()) {
+        // Adult Restricted Alert if user searched adult terms
+        if (isSearchAdultRestricted) {
             item {
-                val firstItem = filteredVideos.first()
-                YouTubeVideoFeedCard(
-                    item = firstItem,
-                    onCardClick = { onTrendingItemClicked(firstItem.videoId, firstItem.title) },
-                    onDownloadClick = { onTrendingItemClicked(firstItem.videoId, firstItem.title) },
-                    onPlayAudioClick = { onTrendingItemClicked(firstItem.videoId, firstItem.title) }
-                )
-                Divider(
-                    color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f),
-                    thickness = 1.dp,
-                    modifier = Modifier.padding(vertical = 4.dp)
-                )
+                Surface(
+                    color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f),
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.5f)),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 8.dp)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Shield,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(36.dp)
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "এডাল্ট ও ১৮+ কন্টেন্ট সম্পূর্ণ নিষিদ্ধ",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp,
+                            color = MaterialTheme.colorScheme.onErrorContainer
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "এই অ্যাপটিতে ১৮+ বা প্রাপ্তবয়স্ক কন্টেন্ট রেস্ট্রিক্টেড করা হয়েছে। অনুগ্রহ করে পারিবারিক বা শিক্ষণীয় কন্টেন্ট অনুসন্ধান করুন।",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.8f),
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                        )
+                    }
+                }
             }
         }
 
-        // 5. YouTube Shorts Shelf (Between video 1 and rest)
-        item {
-            YouTubeShortsShelf(
-                onShortClick = { id ->
-                    onTrendingItemClicked("dQw4w9WgXcQ", "বাংলা সেরা ট্রেন্ডিং শর্টস")
-                }
-            )
-            Divider(
-                color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f),
-                thickness = 1.dp,
-                modifier = Modifier.padding(vertical = 4.dp)
-            )
-        }
-
-        // 6. Remaining YouTube Video Feed Cards
-        if (filteredVideos.size > 1) {
-            items(filteredVideos.drop(1)) { item ->
+        // 4. YouTube Video Feed Cards (All full length regular videos, No Shorts)
+        if (filteredVideos.isNotEmpty()) {
+            items(filteredVideos) { item ->
                 YouTubeVideoFeedCard(
                     item = item,
                     onCardClick = { onTrendingItemClicked(item.videoId, item.title) },
@@ -301,6 +317,21 @@ fun HomeScreen(
                     thickness = 1.dp,
                     modifier = Modifier.padding(vertical = 4.dp)
                 )
+            }
+        } else if (!isSearchAdultRestricted && uiState.searchQuery.isNotBlank()) {
+            item {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(32.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "কোনো ভিডিও পাওয়া যায়নি",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
         }
     }

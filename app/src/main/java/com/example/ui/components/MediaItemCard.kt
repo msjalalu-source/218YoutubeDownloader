@@ -1,9 +1,14 @@
 package com.example.ui.components
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -15,6 +20,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -24,6 +30,9 @@ import coil.compose.AsyncImage
 import com.example.data.local.MediaEntity
 import com.example.ui.theme.CrimsonRed
 import com.example.ui.theme.EmeraldCyan
+import com.example.ui.theme.YouTubeRed
+import com.example.utils.FileUtils
+import java.io.File
 
 @Composable
 fun MediaItemCard(
@@ -36,9 +45,13 @@ fun MediaItemCard(
     onResumeDownload: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
     var showMenu by remember { mutableStateOf(false) }
+    var showFileInfoDialog by remember { mutableStateOf(false) }
+
     val isDownloading = media.downloadStatus == "DOWNLOADING"
     val isPaused = media.downloadStatus == "PAUSED"
+    val isCompleted = media.downloadStatus == "COMPLETED"
 
     Surface(
         onClick = {
@@ -163,6 +176,61 @@ fun MediaItemCard(
                         onDismissRequest = { showMenu = false }
                     ) {
                         DropdownMenuItem(
+                            text = { Text("সরাসরি প্লে করুন") },
+                            leadingIcon = {
+                                Icon(Icons.Default.PlayArrow, contentDescription = null, tint = YouTubeRed)
+                            },
+                            onClick = {
+                                showMenu = false
+                                onClickPlay()
+                            }
+                        )
+
+                        if (isCompleted && !media.localFilePath.isNullOrBlank()) {
+                            DropdownMenuItem(
+                                text = { Text("ডিভাইস প্লেয়ার / ফাইলে খুলুন") },
+                                leadingIcon = {
+                                    Icon(Icons.Default.OpenInNew, contentDescription = null, tint = EmeraldCyan)
+                                },
+                                onClick = {
+                                    showMenu = false
+                                    FileUtils.openWithExternalApp(
+                                        context = context,
+                                        filePath = media.localFilePath,
+                                        isVideo = media.mediaType == "VIDEO"
+                                    )
+                                }
+                            )
+
+                            DropdownMenuItem(
+                                text = { Text("ফাইল লোকেশন ও তথ্য") },
+                                leadingIcon = {
+                                    Icon(Icons.Default.FolderOpen, contentDescription = null)
+                                },
+                                onClick = {
+                                    showMenu = false
+                                    showFileInfoDialog = true
+                                }
+                            )
+
+                            DropdownMenuItem(
+                                text = { Text("ফাইল শেয়ার করুন") },
+                                leadingIcon = {
+                                    Icon(Icons.Default.Share, contentDescription = null)
+                                },
+                                onClick = {
+                                    showMenu = false
+                                    FileUtils.shareFile(
+                                        context = context,
+                                        filePath = media.localFilePath,
+                                        title = media.title,
+                                        isVideo = media.mediaType == "VIDEO"
+                                    )
+                                }
+                            )
+                        }
+
+                        DropdownMenuItem(
                             text = { Text(if (media.isFavorite) "প্রিয় তালিকা থেকে মুছুন" else "প্রিয় তালিকায় যোগ করুন") },
                             leadingIcon = {
                                 Icon(
@@ -176,6 +244,7 @@ fun MediaItemCard(
                                 onToggleFavorite()
                             }
                         )
+
                         DropdownMenuItem(
                             text = { Text("প্লেলিস্টে যুক্ত করুন") },
                             leadingIcon = {
@@ -186,6 +255,7 @@ fun MediaItemCard(
                                 onAddToPlaylist()
                             }
                         )
+
                         DropdownMenuItem(
                             text = { Text("মুছে ফেলুন", color = CrimsonRed) },
                             leadingIcon = {
@@ -244,5 +314,128 @@ fun MediaItemCard(
                 }
             }
         }
+    }
+
+    // File Info Dialog
+    if (showFileInfoDialog) {
+        val path = media.localFilePath ?: ""
+        val file = File(path)
+        val exists = file.exists()
+        val fileSize = if (exists) FileUtils.formatBytes(file.length()) else FileUtils.formatBytes(media.totalSizeBytes)
+
+        AlertDialog(
+            onDismissRequest = { showFileInfoDialog = false },
+            icon = {
+                Icon(
+                    imageVector = Icons.Default.Folder,
+                    contentDescription = null,
+                    tint = YouTubeRed,
+                    modifier = Modifier.size(36.dp)
+                )
+            },
+            title = {
+                Text(
+                    text = "ফাইল তথ্য ও পাথ",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = media.title,
+                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+
+                    HorizontalDivider()
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("ফরম্যাট:", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(if (media.mediaType == "AUDIO") "MP3 অডিও" else "MP4 ভিডিও", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodySmall)
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("ফাইলের সাইজ:", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(fileSize, fontWeight = FontWeight.Bold, color = EmeraldCyan, style = MaterialTheme.typography.bodySmall)
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("অডিও ট্র্যাক:", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(media.selectedAudioLanguage, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodySmall)
+                    }
+
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text("স্টোরেজ ফাইল পাথ:", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+
+                    Surface(
+                        color = MaterialTheme.colorScheme.surface,
+                        shape = RoundedCornerShape(8.dp),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(8.dp)) {
+                            Text(
+                                text = path,
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 3,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.End
+                            ) {
+                                TextButton(
+                                    onClick = {
+                                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                        clipboard.setPrimaryClip(ClipData.newPlainText("File Path", path))
+                                        Toast.makeText(context, "পাথ কপি করা হয়েছে!", Toast.LENGTH_SHORT).show()
+                                    },
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                                ) {
+                                    Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(14.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("পাথ কপি করুন", fontSize = 11.sp)
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showFileInfoDialog = false
+                        FileUtils.openWithExternalApp(
+                            context = context,
+                            filePath = path,
+                            isVideo = media.mediaType == "VIDEO"
+                        )
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = YouTubeRed)
+                ) {
+                    Icon(Icons.Default.OpenInNew, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("ডিভাইস প্লেয়ারে খুলুন")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showFileInfoDialog = false }) {
+                    Text("বন্ধ করুন")
+                }
+            }
+        )
     }
 }

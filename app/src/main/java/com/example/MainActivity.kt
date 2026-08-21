@@ -50,7 +50,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
 
         val database = AppDatabase.getDatabase(applicationContext)
-        val repository = MediaRepository(database)
+        val repository = MediaRepository(database, applicationContext)
         val playbackManager = PlaybackManager()
 
         setContent {
@@ -376,6 +376,8 @@ fun BDTubeMainApp(viewModel: MainViewModel) {
             onPrevious = { viewModel.playbackManager.playPrevious() },
             onSpeedChange = { viewModel.playbackManager.setPlaybackSpeed(it) },
             onAudioTrackChange = { viewModel.playbackManager.switchAudioTrack(it) },
+            onAudioPresetChange = { viewModel.playbackManager.setAudioPreset(it) },
+            onSleepTimerChange = { viewModel.playbackManager.setSleepTimer(it) },
             onToggleLoop = { viewModel.playbackManager.toggleLoop() },
             onToggleShuffle = { viewModel.playbackManager.toggleShuffle() },
             onDismiss = { showFullscreenPlayer = false }

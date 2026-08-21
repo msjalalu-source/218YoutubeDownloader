@@ -7,9 +7,12 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.*
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
@@ -24,6 +27,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -38,8 +42,11 @@ import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
 import com.example.data.local.MediaEntity
 import com.example.data.service.MediaExtractorService
+import com.example.player.AudioEqualizerPreset
 import com.example.player.PlaybackState
 import com.example.ui.theme.YouTubeRed
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import java.io.File
 
 private const val FALLBACK_VIDEO_URL = "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
@@ -56,6 +63,8 @@ fun FullScreenPlayerDialog(
     onPrevious: () -> Unit,
     onSpeedChange: (Float) -> Unit,
     onAudioTrackChange: (String) -> Unit,
+    onAudioPresetChange: (AudioEqualizerPreset) -> Unit,
+    onSleepTimerChange: (Int) -> Unit,
     onToggleLoop: () -> Unit,
     onToggleShuffle: () -> Unit,
     onDismiss: () -> Unit
@@ -63,8 +72,13 @@ fun FullScreenPlayerDialog(
     val media = playbackState.currentMedia ?: return
     var showTrackSelector by remember { mutableStateOf(false) }
     var showSpeedSelector by remember { mutableStateOf(false) }
+    var showPresetSelector by remember { mutableStateOf(false) }
+    var showTimerSelector by remember { mutableStateOf(false) }
     var isVideoBuffering by remember { mutableStateOf(true) }
-    var showVideoControlsOverlay by remember { mutableStateOf(true) }
+
+    // Double tap feedback state
+    var doubleTapSide by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -91,7 +105,7 @@ fun FullScreenPlayerDialog(
 
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(
-                            text = if (media.mediaType == "VIDEO") "ভিডিও সরাসরি প্লেয়ার (MP4)" else "অডিও ট্র্যাক ও গান (MP3)",
+                            text = if (media.mediaType == "VIDEO") "ভিডিও প্লেয়ার (MP4 HD)" else "অডিও ট্র্যাক প্লেয়ার (MP3)",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -121,7 +135,7 @@ fun FullScreenPlayerDialog(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.SpaceBetween
             ) {
-                // Media Canvas / Video Player Screen
+                // Media Canvas / Video Player Screen with Double-Tap Gesture to Seek
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -144,7 +158,6 @@ fun FullScreenPlayerDialog(
                                     onNext()
                                 }
                             },
-                            onTogglePlayPause = onTogglePlayPause,
                             modifier = Modifier.fillMaxSize()
                         )
 
@@ -193,10 +206,68 @@ fun FullScreenPlayerDialog(
                                 AnimatedAudioWave(modifier = Modifier.padding(bottom = 20.dp))
                             } else {
                                 Text(
-                                    text = "অডিও প্লে হচ্ছে (MP3 HQ)",
+                                    text = "অডিও প্লে হচ্ছে (${playbackState.audioPreset.title})",
                                     color = Color.White.copy(alpha = 0.8f),
                                     fontSize = 13.sp,
                                     modifier = Modifier.padding(bottom = 20.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    // Gesture Layer: Double tap left (-10s), Double tap right (+10s), Single tap (Play/Pause)
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .pointerInput(Unit) {
+                                detectTapGestures(
+                                    onDoubleTap = { offset ->
+                                        if (offset.x < size.width / 2) {
+                                            onSkipBackward()
+                                            doubleTapSide = "left"
+                                        } else {
+                                            onSkipForward()
+                                            doubleTapSide = "right"
+                                        }
+                                        scope.launch {
+                                            delay(750)
+                                            doubleTapSide = null
+                                        }
+                                    },
+                                    onTap = {
+                                        onTogglePlayPause()
+                                    }
+                                )
+                            }
+                    )
+
+                    // Visual Feedback for Double-Tap Rewind/Forward
+                    AnimatedVisibility(
+                        visible = doubleTapSide != null,
+                        enter = scaleIn() + fadeIn(),
+                        exit = scaleOut() + fadeOut(),
+                        modifier = Modifier.align(if (doubleTapSide == "left") Alignment.CenterStart else Alignment.CenterEnd)
+                    ) {
+                        Surface(
+                            shape = CircleShape,
+                            color = Color.Black.copy(alpha = 0.7f),
+                            modifier = Modifier.padding(24.dp).size(68.dp)
+                        ) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.Center
+                            ) {
+                                Icon(
+                                    imageVector = if (doubleTapSide == "left") Icons.Default.FastRewind else Icons.Default.FastForward,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(28.dp)
+                                )
+                                Text(
+                                    text = if (doubleTapSide == "left") "-১০ সে" else "+১০ সে",
+                                    color = Color.White,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
                                 )
                             }
                         }
@@ -246,7 +317,7 @@ fun FullScreenPlayerDialog(
                             )
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = "অডিও ট্র্যাক: ${playbackState.selectedAudioTrackName}",
+                                text = "অডিও: ${playbackState.selectedAudioTrackName}",
                                 style = MaterialTheme.typography.labelSmall,
                                 fontWeight = FontWeight.Bold,
                                 color = YouTubeRed
@@ -300,7 +371,7 @@ fun FullScreenPlayerDialog(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(6.dp))
 
                 // Primary Playback Controls
                 Row(
@@ -377,23 +448,42 @@ fun FullScreenPlayerDialog(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(8.dp))
 
-                // Bottom Controls: Speed Selector
+                // Bottom Controls Row: Speed, Equalizer preset, Sleep Timer
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.Center,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     FilterChip(
                         selected = playbackState.playbackSpeed != 1.0f,
                         onClick = { showSpeedSelector = true },
-                        label = { Text("গতি: ${playbackState.playbackSpeed}x") },
-                        leadingIcon = { Icon(Icons.Default.Speed, contentDescription = null, modifier = Modifier.size(16.dp)) }
+                        label = { Text("${playbackState.playbackSpeed}x", fontSize = 12.sp) },
+                        leadingIcon = { Icon(Icons.Default.Speed, contentDescription = null, modifier = Modifier.size(14.dp)) }
+                    )
+
+                    FilterChip(
+                        selected = playbackState.audioPreset != AudioEqualizerPreset.NORMAL,
+                        onClick = { showPresetSelector = true },
+                        label = { Text(playbackState.audioPreset.title.take(10), fontSize = 12.sp) },
+                        leadingIcon = { Icon(Icons.Default.Equalizer, contentDescription = null, modifier = Modifier.size(14.dp)) }
+                    )
+
+                    FilterChip(
+                        selected = playbackState.sleepTimerMinutesLeft > 0,
+                        onClick = { showTimerSelector = true },
+                        label = {
+                            Text(
+                                text = if (playbackState.sleepTimerMinutesLeft > 0) "${playbackState.sleepTimerMinutesLeft} মি" else "স্লিপ",
+                                fontSize = 12.sp
+                            )
+                        },
+                        leadingIcon = { Icon(Icons.Default.Timer, contentDescription = null, modifier = Modifier.size(14.dp)) }
                     )
                 }
 
-                Spacer(modifier = Modifier.height(6.dp))
+                Spacer(modifier = Modifier.height(4.dp))
             }
         }
     }
@@ -453,6 +543,132 @@ fun FullScreenPlayerDialog(
         )
     }
 
+    // Audio Preset / Equalizer Dialog
+    if (showPresetSelector) {
+        AlertDialog(
+            onDismissRequest = { showPresetSelector = false },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.GraphicEq, contentDescription = null, tint = YouTubeRed)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("অডিও সাউন্ড ও ইকুয়ালাইজার", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                }
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    AudioEqualizerPreset.values().forEach { preset ->
+                        val isSelected = playbackState.audioPreset == preset
+                        Surface(
+                            onClick = {
+                                onAudioPresetChange(preset)
+                                showPresetSelector = false
+                            },
+                            shape = RoundedCornerShape(10.dp),
+                            color = if (isSelected) YouTubeRed.copy(alpha = 0.15f) else MaterialTheme.colorScheme.surfaceVariant,
+                            border = if (isSelected) BorderStroke(1.dp, YouTubeRed) else null,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                RadioButton(
+                                    selected = isSelected,
+                                    onClick = {
+                                        onAudioPresetChange(preset)
+                                        showPresetSelector = false
+                                    },
+                                    colors = RadioButtonDefaults.colors(selectedColor = YouTubeRed)
+                                )
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Column {
+                                    Text(
+                                        text = preset.title,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (isSelected) YouTubeRed else MaterialTheme.colorScheme.onSurface,
+                                        fontSize = 14.sp
+                                    )
+                                    Text(
+                                        text = preset.desc,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        fontSize = 11.sp
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showPresetSelector = false }) {
+                    Text("বন্ধ করুন", color = YouTubeRed)
+                }
+            }
+        )
+    }
+
+    // Sleep Timer Dialog
+    if (showTimerSelector) {
+        val timerOptions = listOf(
+            0 to "টাইমার বন্ধ (Off)",
+            15 to "১৫ মিনিট পর বন্ধ",
+            30 to "৩০ মিনিট পর বন্ধ",
+            45 to "৪৫ মিনিট পর বন্ধ",
+            60 to "১ ঘন্টা (৬০ মি) পর বন্ধ"
+        )
+        AlertDialog(
+            onDismissRequest = { showTimerSelector = false },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Timer, contentDescription = null, tint = YouTubeRed)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("স্লিপ টাইমার", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                }
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    timerOptions.forEach { (mins, label) ->
+                        val isSelected = playbackState.sleepTimerMinutesLeft == mins
+                        Surface(
+                            onClick = {
+                                onSleepTimerChange(mins)
+                                showTimerSelector = false
+                            },
+                            shape = RoundedCornerShape(8.dp),
+                            color = if (isSelected) YouTubeRed.copy(alpha = 0.15f) else Color.Transparent,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                RadioButton(
+                                    selected = isSelected,
+                                    onClick = {
+                                        onSleepTimerChange(mins)
+                                        showTimerSelector = false
+                                    },
+                                    colors = RadioButtonDefaults.colors(selectedColor = YouTubeRed)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = label,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                    color = if (isSelected) YouTubeRed else MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showTimerSelector = false }) {
+                    Text("বন্ধ করুন", color = YouTubeRed)
+                }
+            }
+        )
+    }
+
     // Speed Selector Dialog
     if (showSpeedSelector) {
         val speeds = listOf(0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f)
@@ -492,7 +708,6 @@ fun VideoPlayerView(
     isLooping: Boolean,
     onBufferingChanged: (Boolean) -> Unit,
     onCompletion: () -> Unit,
-    onTogglePlayPause: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -565,12 +780,7 @@ fun VideoPlayerView(
                     // ignore
                 }
             },
-            modifier = Modifier.fillMaxSize().clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null
-            ) {
-                onTogglePlayPause()
-            }
+            modifier = Modifier.fillMaxSize()
         )
     }
 }
@@ -605,3 +815,4 @@ fun AnimatedAudioWave(modifier: Modifier = Modifier) {
         }
     }
 }
+

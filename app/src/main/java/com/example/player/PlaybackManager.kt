@@ -15,6 +15,13 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import java.io.File
 
+enum class AudioEqualizerPreset(val title: String, val desc: String) {
+    NORMAL("সাধারণ (Normal)", "স্বাভাবিক ও ব্যালান্সড অডিও"),
+    VOCAL_BOOST("ভোকাল ক্লিয়ার (Vocal)", "স্পষ্ট কণ্ঠস্বর ও সংলাপ"),
+    BASS_BOOST("বেস বুস্ট (Bass+)", "গভীর ও শক্তিশালী বেস"),
+    PODCAST("পডকাস্ট ও ওয়াজ", "কথোপকথন ও বাচনভঙ্গি ফোকাসড")
+}
+
 data class PlaybackState(
     val currentMedia: MediaEntity? = null,
     val isPlaying: Boolean = false,
@@ -27,7 +34,8 @@ data class PlaybackState(
     val isShuffle: Boolean = false,
     val selectedAudioTrackName: String = "বাংলা (Bengali - ডিফল্ট)",
     val sleepTimerMinutesLeft: Int = 0,
-    val isFullscreenVideo: Boolean = false
+    val isFullscreenVideo: Boolean = false,
+    val audioPreset: AudioEqualizerPreset = AudioEqualizerPreset.NORMAL
 )
 
 class PlaybackManager {
@@ -37,6 +45,7 @@ class PlaybackManager {
 
     private val playerScope = CoroutineScope(Dispatchers.Main)
     private var progressJob: Job? = null
+    private var sleepTimerJob: Job? = null
     private var playlistQueue: List<MediaEntity> = emptyList()
     private var currentIndex: Int = -1
 
@@ -248,8 +257,27 @@ class PlaybackManager {
         _playbackState.value = _playbackState.value.copy(isShuffle = !_playbackState.value.isShuffle)
     }
 
+    fun setAudioPreset(preset: AudioEqualizerPreset) {
+        _playbackState.value = _playbackState.value.copy(audioPreset = preset)
+    }
+
     fun setSleepTimer(minutes: Int) {
+        sleepTimerJob?.cancel()
         _playbackState.value = _playbackState.value.copy(sleepTimerMinutesLeft = minutes)
+        if (minutes > 0) {
+            sleepTimerJob = playerScope.launch {
+                var remaining = minutes
+                while (remaining > 0 && _playbackState.value.isPlaying) {
+                    delay(60000L) // 1 minute
+                    remaining--
+                    _playbackState.value = _playbackState.value.copy(sleepTimerMinutesLeft = remaining)
+                }
+                if (remaining <= 0) {
+                    pause()
+                    _playbackState.value = _playbackState.value.copy(sleepTimerMinutesLeft = 0)
+                }
+            }
+        }
     }
 
     fun setFullscreen(fullscreen: Boolean) {

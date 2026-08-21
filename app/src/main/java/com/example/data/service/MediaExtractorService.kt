@@ -16,8 +16,24 @@ object MediaExtractorService {
         Pattern.CASE_INSENSITIVE
     )
 
+    private val ADULT_KEYWORDS = listOf(
+        "porn", "xxx", "adult", "18+", "nsfw", "sex", "nude", "erotic", "xvideos", "xnxx",
+        "redtube", "brazzers", "chaturbate", "onlyfans", "hentai", "strip", "erotica", "boobs",
+        "pussy", "dick", "vagina", "blowjob", "fuck", "anal", "tits", "milf", "camgirl",
+        "bonga", "spankbang", "youporn", "xhamster", "kamuk", "যৌন", "পর্ন", "সেক্স",
+        "১৮+", "খোলামেলা", "অশ্লীল", "নগ্ন", "কামুক", "চটি", "ম্যাগাজিন ১৮"
+    )
+
+    fun isAdultOrRestrictedContent(text: String): Boolean {
+        val lower = text.lowercase().trim()
+        return ADULT_KEYWORDS.any { keyword ->
+            lower.contains(keyword)
+        }
+    }
+
     fun isSupportedUrl(url: String): Boolean {
         val trimmed = url.trim()
+        if (isAdultOrRestrictedContent(trimmed)) return false
         return trimmed.contains("youtube.com") ||
                 trimmed.contains("youtu.be") ||
                 trimmed.contains("soundcloud.com") ||
@@ -35,6 +51,9 @@ object MediaExtractorService {
 
     suspend fun extractMediaDetails(inputUrl: String): VideoDetails = withContext(Dispatchers.IO) {
         val cleanUrl = inputUrl.trim()
+        if (isAdultOrRestrictedContent(cleanUrl)) {
+            throw SecurityException("⚠️ ১৮+ বা এডাল্ট কন্টেন্ট রেস্ট্রিক্টেড করা হয়েছে। এই লিংক প্লে বা ডাউনলোড করা যাবে না।")
+        }
         val ytId = extractYouTubeId(cleanUrl)
 
         if (ytId != null) {

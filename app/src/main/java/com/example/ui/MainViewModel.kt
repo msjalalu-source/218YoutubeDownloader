@@ -119,6 +119,14 @@ class MainViewModel(
         val targetUrl = urlToExtract.trim()
         if (targetUrl.isBlank()) return
 
+        if (MediaExtractorService.isAdultOrRestrictedContent(targetUrl)) {
+            _uiState.value = _uiState.value.copy(
+                isExtracting = false,
+                bannerMessage = "⚠️ ১৮+ বা প্রাপ্তবয়স্ক কন্টেন্ট সম্পূর্ণ নিষিদ্ধ ও রেস্ট্রিক্টেড করা হয়েছে।"
+            )
+            return
+        }
+
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(
                 isExtracting = true,
@@ -146,6 +154,11 @@ class MainViewModel(
                     selectedVideoOption = defaultVideo,
                     showQuickDownloadModal = true,
                     bannerMessage = "সরাসরি স্ট্রিম ও বাংলা অডিও ট্র্যাক প্রস্তুত!"
+                )
+            } catch (se: SecurityException) {
+                _uiState.value = _uiState.value.copy(
+                    isExtracting = false,
+                    bannerMessage = se.message ?: "⚠️ ১৮+ কন্টেন্ট রেস্ট্রিক্টেড করা হয়েছে।"
                 )
             } catch (e: Exception) {
                 _uiState.value = _uiState.value.copy(

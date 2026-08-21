@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.LocalTextSelectionColors
 import androidx.compose.foundation.text.selection.TextSelectionColors
@@ -30,21 +31,23 @@ import com.example.data.model.VideoDetails
 import com.example.data.model.VideoStreamOption
 import kotlin.math.roundToInt
 
-private val HeaderRed = Color(0xFFB71C1C) // NewPipe Crimson Red Header
-private val DialogDarkBackground = Color(0xFF2B2B2B)
-private val DialogTextSecondary = Color(0xFFB0B0B0)
+private val HeaderRed = Color(0xFFC4302B) // NewPipe Crimson Red Header
+private val DialogDarkBackground = Color(0xFF383838) // Authentic NewPipe Dark Gray
+private val DialogTextSecondary = Color(0xFFA8A8A8)
+private val DropdownButtonBg = Color(0xFF4A4A4A)
 
 data class CaptionOption(
     val id: String,
     val languageName: String,
+    val languageCode: String = "en.1",
     val format: String = "VTT / SRT",
     val sizeEstimatedMb: Double = 0.08
 )
 
 val sampleCaptions = listOf(
-    CaptionOption("bn_caption", "বাংলা সাবটাইটেল (Bengali)", "SRT"),
-    CaptionOption("en_caption", "English Subtitles", "VTT"),
-    CaptionOption("ar_caption", "Arabic (العربية)", "SRT")
+    CaptionOption("bn_caption", "বাংলা সাবটাইটেল (Bengali)", "bn.1", "SRT", 0.05),
+    CaptionOption("en_caption", "English Subtitles", "en.2", "VTT", 0.08),
+    CaptionOption("ar_caption", "Arabic (العربية)", "ar.3", "SRT", 0.06)
 )
 
 @Composable
@@ -63,13 +66,14 @@ fun QuickDownloadBottomSheet(
     var fileName by remember(videoDetails.title) { mutableStateOf(videoDetails.title) }
     var selectedMediaType by remember(selectedTab) { mutableIntStateOf(selectedTab) } // 0: Video, 1: Audio, 2: Captions
     var threadCount by remember { mutableFloatStateOf(3f) }
-    var showStreamSelectorMenu by remember { mutableStateOf(false) }
+    var showVideoResolutionMenu by remember { mutableStateOf(false) }
+    var showAudioTrackMenu by remember { mutableStateOf(false) }
     var selectedCaption by remember { mutableStateOf(sampleCaptions.first()) }
 
     // Ensure initial default selections
     val currentVideo = selectedVideoOption
-        ?: videoDetails.videoStreams.find { it.qualityLabel.contains("480p") || it.resolutionHeight == 480 }
         ?: videoDetails.videoStreams.find { it.qualityLabel.contains("720p") || it.resolutionHeight == 720 }
+        ?: videoDetails.videoStreams.find { it.qualityLabel.contains("480p") || it.resolutionHeight == 480 }
         ?: videoDetails.videoStreams.firstOrNull()
 
     val currentAudio = selectedAudioOption
@@ -88,16 +92,16 @@ fun QuickDownloadBottomSheet(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 24.dp, vertical = 36.dp),
+                .padding(horizontal = 24.dp, vertical = 32.dp),
             contentAlignment = Alignment.Center
         ) {
             Surface(
-                shape = RoundedCornerShape(8.dp),
+                shape = RoundedCornerShape(4.dp),
                 color = DialogDarkBackground,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .widthIn(max = 420.dp)
-                    .clip(RoundedCornerShape(8.dp))
+                    .widthIn(max = 400.dp)
+                    .clip(RoundedCornerShape(4.dp))
                     .testTag("newpipe_download_dialog")
             ) {
                 Column(
@@ -113,7 +117,7 @@ fun QuickDownloadBottomSheet(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 8.dp, vertical = 6.dp),
+                                .padding(horizontal = 6.dp, vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
@@ -122,7 +126,9 @@ fun QuickDownloadBottomSheet(
                             ) {
                                 IconButton(
                                     onClick = onDismiss,
-                                    modifier = Modifier.testTag("download_dialog_back_button")
+                                    modifier = Modifier
+                                        .size(40.dp)
+                                        .testTag("download_dialog_back_button")
                                 ) {
                                     Icon(
                                         imageVector = Icons.AutoMirrored.Filled.ArrowBack,
@@ -134,7 +140,7 @@ fun QuickDownloadBottomSheet(
                                 Text(
                                     text = "Download",
                                     color = Color.White,
-                                    fontSize = 20.sp,
+                                    fontSize = 19.sp,
                                     fontWeight = FontWeight.SemiBold
                                 )
                             }
@@ -149,32 +155,32 @@ fun QuickDownloadBottomSheet(
                                 Text(
                                     text = "OKAY",
                                     color = Color.White,
-                                    fontSize = 16.sp,
+                                    fontSize = 15.sp,
                                     fontWeight = FontWeight.Bold
                                 )
                             }
                         }
                     }
 
-                    // Content Area
+                    // Content Area (Exact NewPipe layout)
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 22.dp, vertical = 18.dp)
+                            .padding(horizontal = 20.dp, vertical = 16.dp)
                     ) {
-                        // File name label
+                        // 1. File name label
                         Text(
                             text = "File name",
                             color = DialogTextSecondary,
-                            fontSize = 14.sp
+                            fontSize = 13.sp
                         )
 
                         Spacer(modifier = Modifier.height(4.dp))
 
-                        // File name input field (underlined style matching screenshot)
+                        // 2. File name input field with underline
                         val customTextSelectionColors = TextSelectionColors(
-                            handleColor = HeaderRed,
-                            backgroundColor = HeaderRed.copy(alpha = 0.4f)
+                            handleColor = Color.White,
+                            backgroundColor = Color.White.copy(alpha = 0.3f)
                         )
                         CompositionLocalProvider(LocalTextSelectionColors provides customTextSelectionColors) {
                             TextField(
@@ -184,16 +190,17 @@ fun QuickDownloadBottomSheet(
                                 maxLines = 3,
                                 textStyle = MaterialTheme.typography.bodyMedium.copy(
                                     color = Color.White,
-                                    fontSize = 14.sp,
-                                    lineHeight = 20.sp
+                                    fontSize = 15.sp,
+                                    lineHeight = 21.sp,
+                                    fontWeight = FontWeight.Medium
                                 ),
                                 colors = TextFieldDefaults.colors(
                                     focusedContainerColor = Color.Transparent,
                                     unfocusedContainerColor = Color.Transparent,
                                     disabledContainerColor = Color.Transparent,
-                                    focusedIndicatorColor = HeaderRed,
-                                    unfocusedIndicatorColor = Color.LightGray.copy(alpha = 0.5f),
-                                    cursorColor = HeaderRed
+                                    focusedIndicatorColor = Color.White,
+                                    unfocusedIndicatorColor = Color.LightGray.copy(alpha = 0.6f),
+                                    cursorColor = Color.White
                                 ),
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -201,9 +208,9 @@ fun QuickDownloadBottomSheet(
                             )
                         }
 
-                        Spacer(modifier = Modifier.height(18.dp))
+                        Spacer(modifier = Modifier.height(16.dp))
 
-                        // Radio Button Group: Video | Audio | Captions
+                        // 3. Radio Button Group: Video | Audio | Captions
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically,
@@ -227,18 +234,18 @@ fun QuickDownloadBottomSheet(
                                     },
                                     colors = RadioButtonDefaults.colors(
                                         selectedColor = Color.White,
-                                        unselectedColor = Color.LightGray
+                                        unselectedColor = DialogTextSecondary
                                     )
                                 )
                                 Text(
                                     text = "Video",
                                     color = Color.White,
                                     fontSize = 14.sp,
-                                    fontWeight = if (selectedMediaType == 0) FontWeight.SemiBold else FontWeight.Normal
+                                    fontWeight = FontWeight.Medium
                                 )
                             }
 
-                            Spacer(modifier = Modifier.width(14.dp))
+                            Spacer(modifier = Modifier.width(10.dp))
 
                             // Audio Radio
                             Row(
@@ -258,18 +265,18 @@ fun QuickDownloadBottomSheet(
                                     },
                                     colors = RadioButtonDefaults.colors(
                                         selectedColor = Color.White,
-                                        unselectedColor = Color.LightGray
+                                        unselectedColor = DialogTextSecondary
                                     )
                                 )
                                 Text(
                                     text = "Audio",
                                     color = Color.White,
                                     fontSize = 14.sp,
-                                    fontWeight = if (selectedMediaType == 1) FontWeight.SemiBold else FontWeight.Normal
+                                    fontWeight = FontWeight.Medium
                                 )
                             }
 
-                            Spacer(modifier = Modifier.width(14.dp))
+                            Spacer(modifier = Modifier.width(10.dp))
 
                             // Captions Radio
                             Row(
@@ -289,23 +296,29 @@ fun QuickDownloadBottomSheet(
                                     },
                                     colors = RadioButtonDefaults.colors(
                                         selectedColor = Color.White,
-                                        unselectedColor = Color.LightGray
+                                        unselectedColor = DialogTextSecondary
                                     )
                                 )
                                 Text(
                                     text = "Captions",
                                     color = Color.White,
                                     fontSize = 14.sp,
-                                    fontWeight = if (selectedMediaType == 2) FontWeight.SemiBold else FontWeight.Normal
+                                    fontWeight = FontWeight.Medium
                                 )
                             }
                         }
 
-                        Spacer(modifier = Modifier.height(16.dp))
+                        Spacer(modifier = Modifier.height(14.dp))
 
-                        // Stream / Quality Selection Dropdown Trigger
+                        // 4. Primary Stream Selection Row (Video Resolution or Audio Format or Captions)
                         Surface(
-                            onClick = { showStreamSelectorMenu = true },
+                            onClick = {
+                                when (selectedMediaType) {
+                                    0 -> showVideoResolutionMenu = true
+                                    1 -> showAudioTrackMenu = true
+                                    else -> showVideoResolutionMenu = true
+                                }
+                            },
                             color = Color.Transparent,
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -314,71 +327,119 @@ fun QuickDownloadBottomSheet(
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(vertical = 8.dp),
+                                    .padding(vertical = 4.dp),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                // Left details (Format and Quality / Resolution / Language)
                                 Column(modifier = Modifier.weight(1f)) {
                                     when (selectedMediaType) {
                                         0 -> {
                                             Text(
                                                 text = currentVideo?.format ?: "MPEG-4",
                                                 color = DialogTextSecondary,
-                                                fontSize = 13.sp
+                                                fontSize = 12.sp
                                             )
                                             Text(
-                                                text = currentVideo?.qualityLabel ?: "480p SD",
+                                                text = currentVideo?.qualityLabel ?: "720p",
                                                 color = Color.White,
-                                                fontWeight = FontWeight.Bold,
-                                                fontSize = 15.sp
+                                                fontSize = 15.sp,
+                                                fontWeight = FontWeight.Medium
                                             )
                                         }
                                         1 -> {
                                             Text(
                                                 text = currentAudio?.format ?: "M4A / AAC",
                                                 color = DialogTextSecondary,
-                                                fontSize = 13.sp
+                                                fontSize = 12.sp
                                             )
                                             Text(
-                                                text = currentAudio?.languageName ?: "বাংলা (Bengali)",
+                                                text = "${currentAudio?.bitrateKbps ?: 128} kbps",
                                                 color = Color.White,
-                                                fontWeight = FontWeight.Bold,
-                                                fontSize = 15.sp
+                                                fontSize = 15.sp,
+                                                fontWeight = FontWeight.Medium
                                             )
                                         }
                                         else -> {
                                             Text(
                                                 text = selectedCaption.format,
                                                 color = DialogTextSecondary,
-                                                fontSize = 13.sp
+                                                fontSize = 12.sp
                                             )
                                             Text(
                                                 text = selectedCaption.languageName,
                                                 color = Color.White,
-                                                fontWeight = FontWeight.Bold,
-                                                fontSize = 15.sp
+                                                fontSize = 15.sp,
+                                                fontWeight = FontWeight.Medium
                                             )
                                         }
                                     }
                                 }
 
-                                // Right details (File size and Dropdown arrow)
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     val sizeText = when (selectedMediaType) {
-                                        0 -> "${currentVideo?.sizeEstimatedMb ?: 14.8} MB"
+                                        0 -> "${currentVideo?.sizeEstimatedMb ?: 125.23} MB"
                                         1 -> "${currentAudio?.sizeEstimatedMb ?: 5.6} MB"
                                         else -> "${selectedCaption.sizeEstimatedMb} MB"
                                     }
                                     Text(
                                         text = sizeText,
                                         color = DialogTextSecondary,
-                                        fontSize = 14.sp
+                                        fontSize = 13.sp
                                     )
-                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    // Circular dropdown arrow pill like in screenshot
+                                    Surface(
+                                        shape = CircleShape,
+                                        color = DropdownButtonBg,
+                                        modifier = Modifier.size(32.dp)
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Icon(
+                                                imageVector = Icons.Default.ArrowDropDown,
+                                                contentDescription = "Select Option",
+                                                tint = Color.White,
+                                                modifier = Modifier.size(22.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // 5. Secondary Stream Row (Audio Track selection for Video, e.g. en.4 English original or bn.1 Bangla)
+                        if (selectedMediaType == 0) {
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Surface(
+                                onClick = { showAudioTrackMenu = true },
+                                color = Color.Transparent,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("audio_track_dropdown_trigger")
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 4.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = currentAudio?.languageCode ?: "en.4",
+                                            color = DialogTextSecondary,
+                                            fontSize = 12.sp
+                                        )
+                                        Text(
+                                            text = currentAudio?.languageName ?: "English original",
+                                            color = Color.White,
+                                            fontSize = 15.sp,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                    }
+
                                     Icon(
                                         imageVector = Icons.Default.ArrowDropDown,
-                                        contentDescription = "Select Quality",
+                                        contentDescription = "Select Audio Track",
                                         tint = DialogTextSecondary,
                                         modifier = Modifier.size(24.dp)
                                     )
@@ -386,14 +447,16 @@ fun QuickDownloadBottomSheet(
                             }
                         }
 
-                        Spacer(modifier = Modifier.height(14.dp))
+                        Spacer(modifier = Modifier.height(16.dp))
 
-                        // Threads Slider
+                        // 6. Threads Slider Section
                         Text(
                             text = "Threads",
                             color = DialogTextSecondary,
-                            fontSize = 14.sp
+                            fontSize = 13.sp
                         )
+
+                        Spacer(modifier = Modifier.height(4.dp))
 
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -403,8 +466,8 @@ fun QuickDownloadBottomSheet(
                                 text = "${threadCount.roundToInt()}",
                                 color = Color.White,
                                 fontSize = 14.sp,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.width(28.dp)
+                                fontWeight = FontWeight.Normal,
+                                modifier = Modifier.width(24.dp)
                             )
                             Slider(
                                 value = threadCount,
@@ -413,8 +476,8 @@ fun QuickDownloadBottomSheet(
                                 steps = 6,
                                 colors = SliderDefaults.colors(
                                     thumbColor = Color.White,
-                                    activeTrackColor = Color.LightGray,
-                                    inactiveTrackColor = Color.DarkGray
+                                    activeTrackColor = Color.White,
+                                    inactiveTrackColor = Color(0xFF666666)
                                 ),
                                 modifier = Modifier
                                     .weight(1f)
@@ -422,17 +485,17 @@ fun QuickDownloadBottomSheet(
                             )
                         }
 
-                        Spacer(modifier = Modifier.height(14.dp))
+                        Spacer(modifier = Modifier.height(16.dp))
 
-                        // Centered Disclaimer / Helper note
+                        // 7. Footer disclaimer
                         Text(
                             text = "Streams which are not yet supported by the downloader are not shown",
-                            color = Color.Gray,
-                            fontSize = 11.sp,
+                            color = DialogTextSecondary,
+                            fontSize = 11.5.sp,
                             textAlign = TextAlign.Center,
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 12.dp)
+                                .padding(horizontal = 4.dp)
                         )
                     }
                 }
@@ -440,18 +503,14 @@ fun QuickDownloadBottomSheet(
         }
     }
 
-    // Modal / Dialog for Stream Selection
-    if (showStreamSelectorMenu) {
+    // Modal / Dialog for Video Resolution Selection
+    if (showVideoResolutionMenu) {
         AlertDialog(
-            onDismissRequest = { showStreamSelectorMenu = false },
-            containerColor = Color(0xFF222222),
+            onDismissRequest = { showVideoResolutionMenu = false },
+            containerColor = Color(0xFF2E2E2E),
             title = {
                 Text(
-                    text = when (selectedMediaType) {
-                        0 -> "Select Video Resolution"
-                        1 -> "Select Audio Track (বাংলা / হিন্দি / অরিজিনাল)"
-                        else -> "Select Captions"
-                    },
+                    text = "Select Video Resolution",
                     color = Color.White,
                     fontSize = 16.sp,
                     fontWeight = FontWeight.Bold
@@ -462,159 +521,54 @@ fun QuickDownloadBottomSheet(
                     modifier = Modifier
                         .fillMaxWidth()
                         .verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    when (selectedMediaType) {
-                        0 -> {
-                            videoDetails.videoStreams.forEach { option ->
-                                val isSelected = currentVideo?.id == option.id
-                                Surface(
-                                    onClick = {
-                                        onVideoOptionSelected(option)
-                                        showStreamSelectorMenu = false
-                                    },
-                                    shape = RoundedCornerShape(8.dp),
-                                    color = if (isSelected) HeaderRed.copy(alpha = 0.25f) else Color(0xFF2E2E2E),
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(horizontal = 12.dp, vertical = 10.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.SpaceBetween
-                                    ) {
-                                        Column {
-                                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                                Text(
-                                                    text = option.qualityLabel,
-                                                    color = Color.White,
-                                                    fontWeight = FontWeight.Bold,
-                                                    fontSize = 14.sp
-                                                )
-                                                if (option.resolutionHeight == 480 || option.qualityLabel.contains("480p")) {
-                                                    Spacer(modifier = Modifier.width(6.dp))
-                                                    Text(
-                                                        text = "(Default)",
-                                                        color = HeaderRed,
-                                                        fontSize = 11.sp,
-                                                        fontWeight = FontWeight.Bold
-                                                    )
-                                                }
-                                            }
-                                            Text(
-                                                text = "${option.format} • ${option.fps}fps",
-                                                color = DialogTextSecondary,
-                                                fontSize = 12.sp
-                                            )
-                                        }
-
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
-                                            Text(
-                                                text = "${option.sizeEstimatedMb} MB",
-                                                color = DialogTextSecondary,
-                                                fontSize = 12.sp
-                                            )
-                                            if (isSelected) {
-                                                Spacer(modifier = Modifier.width(8.dp))
-                                                Icon(
-                                                    imageVector = Icons.Default.Check,
-                                                    contentDescription = null,
-                                                    tint = Color.White,
-                                                    modifier = Modifier.size(16.dp)
-                                                )
-                                            }
-                                        }
-                                    }
+                    videoDetails.videoStreams.forEach { option ->
+                        val isSelected = currentVideo?.id == option.id
+                        Surface(
+                            onClick = {
+                                onVideoOptionSelected(option)
+                                showVideoResolutionMenu = false
+                            },
+                            shape = RoundedCornerShape(6.dp),
+                            color = if (isSelected) HeaderRed.copy(alpha = 0.35f) else Color(0xFF383838),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Column {
+                                    Text(
+                                        text = option.qualityLabel,
+                                        color = Color.White,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 14.sp
+                                    )
+                                    Text(
+                                        text = "${option.format} • ${option.fps}fps",
+                                        color = DialogTextSecondary,
+                                        fontSize = 12.sp
+                                    )
                                 }
-                            }
-                        }
-                        1 -> {
-                            videoDetails.audioTracks.forEach { track ->
-                                val isSelected = currentAudio?.id == track.id
-                                Surface(
-                                    onClick = {
-                                        onAudioOptionSelected(track)
-                                        showStreamSelectorMenu = false
-                                    },
-                                    shape = RoundedCornerShape(8.dp),
-                                    color = if (isSelected) HeaderRed.copy(alpha = 0.25f) else Color(0xFF2E2E2E),
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(horizontal = 12.dp, vertical = 10.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.SpaceBetween
-                                    ) {
-                                        Column(modifier = Modifier.weight(1f)) {
-                                            Text(
-                                                text = track.languageName,
-                                                color = Color.White,
-                                                fontWeight = FontWeight.Bold,
-                                                fontSize = 14.sp
-                                            )
-                                            Text(
-                                                text = "${track.format} • ${track.bitrateKbps} kbps",
-                                                color = DialogTextSecondary,
-                                                fontSize = 12.sp
-                                            )
-                                        }
 
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
-                                            Text(
-                                                text = "${track.sizeEstimatedMb} MB",
-                                                color = DialogTextSecondary,
-                                                fontSize = 12.sp
-                                            )
-                                            if (isSelected) {
-                                                Spacer(modifier = Modifier.width(8.dp))
-                                                Icon(
-                                                    imageVector = Icons.Default.Check,
-                                                    contentDescription = null,
-                                                    tint = Color.White,
-                                                    modifier = Modifier.size(16.dp)
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        else -> {
-                            sampleCaptions.forEach { caption ->
-                                val isSelected = selectedCaption.id == caption.id
-                                Surface(
-                                    onClick = {
-                                        selectedCaption = caption
-                                        showStreamSelectorMenu = false
-                                    },
-                                    shape = RoundedCornerShape(8.dp),
-                                    color = if (isSelected) HeaderRed.copy(alpha = 0.25f) else Color(0xFF2E2E2E),
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(horizontal = 12.dp, vertical = 10.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.SpaceBetween
-                                    ) {
-                                        Text(
-                                            text = caption.languageName,
-                                            color = Color.White,
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 14.sp
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        text = "${option.sizeEstimatedMb} MB",
+                                        color = DialogTextSecondary,
+                                        fontSize = 12.sp
+                                    )
+                                    if (isSelected) {
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Icon(
+                                            imageVector = Icons.Default.Check,
+                                            contentDescription = "Selected",
+                                            tint = Color.White,
+                                            modifier = Modifier.size(18.dp)
                                         )
-                                        if (isSelected) {
-                                            Icon(
-                                                imageVector = Icons.Default.Check,
-                                                contentDescription = null,
-                                                tint = Color.White,
-                                                modifier = Modifier.size(16.dp)
-                                            )
-                                        }
                                     }
                                 }
                             }
@@ -623,8 +577,89 @@ fun QuickDownloadBottomSheet(
                 }
             },
             confirmButton = {
-                TextButton(onClick = { showStreamSelectorMenu = false }) {
-                    Text("OK", color = Color.White, fontWeight = FontWeight.Bold)
+                TextButton(onClick = { showVideoResolutionMenu = false }) {
+                    Text("OK", color = Color.White)
+                }
+            }
+        )
+    }
+
+    // Modal / Dialog for Audio Track Language Selection
+    if (showAudioTrackMenu) {
+        AlertDialog(
+            onDismissRequest = { showAudioTrackMenu = false },
+            containerColor = Color(0xFF2E2E2E),
+            title = {
+                Text(
+                    text = "Select Audio Track Language",
+                    color = Color.White,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    videoDetails.audioTracks.forEach { track ->
+                        val isSelected = currentAudio?.id == track.id
+                        Surface(
+                            onClick = {
+                                onAudioOptionSelected(track)
+                                showAudioTrackMenu = false
+                            },
+                            shape = RoundedCornerShape(6.dp),
+                            color = if (isSelected) HeaderRed.copy(alpha = 0.35f) else Color(0xFF383838),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Column {
+                                    Text(
+                                        text = track.languageName,
+                                        color = Color.White,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 14.sp
+                                    )
+                                    Text(
+                                        text = "${track.languageCode} • ${track.bitrateKbps} kbps • ${track.format}",
+                                        color = DialogTextSecondary,
+                                        fontSize = 12.sp
+                                    )
+                                }
+
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        text = "${track.sizeEstimatedMb} MB",
+                                        color = DialogTextSecondary,
+                                        fontSize = 12.sp
+                                    )
+                                    if (isSelected) {
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Icon(
+                                            imageVector = Icons.Default.Check,
+                                            contentDescription = "Selected",
+                                            tint = Color.White,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showAudioTrackMenu = false }) {
+                    Text("OK", color = Color.White)
                 }
             }
         )

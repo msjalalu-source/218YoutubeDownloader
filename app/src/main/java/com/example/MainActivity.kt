@@ -322,7 +322,10 @@ fun BDTubeMainApp(viewModel: MainViewModel) {
                 1 -> DownloadsScreen(
                     activeDownloads = activeDownloads,
                     completedDownloads = completedDownloads,
-                    onPlayMedia = { media, list -> viewModel.playOfflineMedia(media, list) },
+                    onPlayMedia = { media, list ->
+                        viewModel.playOfflineMedia(media, list)
+                        showFullscreenPlayer = true
+                    },
                     onToggleFavorite = { viewModel.toggleFavorite(it) },
                     onAddToPlaylist = { viewModel.openAddToPlaylistDialog(it) },
                     onDeleteMedia = { viewModel.deleteMedia(it) },
@@ -353,7 +356,10 @@ fun BDTubeMainApp(viewModel: MainViewModel) {
             onStartDownload = { isAudioOnly, customTitle, threads ->
                 viewModel.startDownloadFromModal(isAudioOnly, customTitle, threads)
             },
-            onPlayDirectStream = { isAudioOnly -> viewModel.playStreamDirectly(isAudioOnly) },
+            onPlayDirectStream = { isAudioOnly ->
+                viewModel.playStreamDirectly(isAudioOnly)
+                showFullscreenPlayer = true
+            },
             onDismiss = { viewModel.dismissDownloadModal() }
         )
     }

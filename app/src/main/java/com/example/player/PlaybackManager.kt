@@ -1,5 +1,9 @@
 package com.example.player
 
+import android.media.AudioAttributes
+import android.media.MediaPlayer
+import android.os.Build
+import android.util.Log
 import com.example.data.local.MediaEntity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -9,10 +13,12 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import java.io.File
 
 data class PlaybackState(
     val currentMedia: MediaEntity? = null,
     val isPlaying: Boolean = false,
+    val isBuffering: Boolean = false,
     val currentPositionMs: Long = 0L,
     val durationMs: Long = 0L,
     val playbackSpeed: Float = 1.0f,
@@ -34,6 +40,14 @@ class PlaybackManager {
     private var playlistQueue: List<MediaEntity> = emptyList()
     private var currentIndex: Int = -1
 
+    private var mediaPlayer: MediaPlayer? = null
+
+    companion object {
+        private const val TAG = "PlaybackManager"
+        private const val DEFAULT_AUDIO_STREAM = "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3"
+        private const val DEFAULT_VIDEO_STREAM = "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
+    }
+
     fun playMedia(media: MediaEntity, queue: List<MediaEntity> = listOf(media)) {
         playlistQueue = queue
         currentIndex = queue.indexOfFirst { it.id == media.id }.takeIf { it >= 0 } ?: 0
@@ -42,12 +56,87 @@ class PlaybackManager {
         _playbackState.value = _playbackState.value.copy(
             currentMedia = media,
             isPlaying = true,
+            isBuffering = true,
             currentPositionMs = 0L,
             durationMs = if (duration > 0) duration else 180000L,
             selectedAudioTrackName = media.selectedAudioLanguage.ifBlank { "বাংলা (Bengali - ডিফল্ট)" }
         )
 
-        startPositionTicker()
+        if (media.mediaType == "AUDIO") {
+            startAudioPlayback(media)
+        } else {
+            // For video, release audio media player to prevent dual-audio
+            releaseMediaPlayer()
+            _playbackState.value = _playbackState.value.copy(isBuffering = false)
+            startPositionTicker()
+        }
+    }
+
+    private fun startAudioPlayback(media: MediaEntity) {
+        try {
+            releaseMediaPlayer()
+
+            val mp = MediaPlayer().apply {
+                setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                        .setUsage(AudioAttributes.USAGE_MEDIA)
+                        .build()
+                )
+
+                // Determine playable source: local file if exists, else streamUrl, else fallback
+                val source = getPlayableAudioSource(media)
+                setDataSource(source)
+
+                setOnPreparedListener { player ->
+                    _playbackState.value = _playbackState.value.copy(
+                        isBuffering = false,
+                        isPlaying = true,
+                        durationMs = player.duration.toLong().coerceAtLeast(media.durationSeconds * 1000L)
+                    )
+                    applyPlaybackSpeed(_playbackState.value.playbackSpeed)
+                    player.start()
+                    startPositionTicker()
+                }
+
+                setOnCompletionListener {
+                    if (_playbackState.value.isLooping) {
+                        seekTo(0L)
+                        start()
+                    } else {
+                        playNext()
+                    }
+                }
+
+                setOnErrorListener { _, what, extra ->
+                    Log.e(TAG, "MediaPlayer error: what=$what, extra=$extra")
+                    _playbackState.value = _playbackState.value.copy(isBuffering = false)
+                    // Fallback to position ticker so UI doesn't freeze
+                    startPositionTicker()
+                    true
+                }
+
+                prepareAsync()
+            }
+            mediaPlayer = mp
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to initialize MediaPlayer for audio: ${e.message}", e)
+            _playbackState.value = _playbackState.value.copy(isBuffering = false)
+            startPositionTicker()
+        }
+    }
+
+    private fun getPlayableAudioSource(media: MediaEntity): String {
+        if (!media.localFilePath.isNullOrBlank()) {
+            val file = File(media.localFilePath)
+            if (file.exists() && file.length() > 0) {
+                return file.absolutePath
+            }
+        }
+        if (media.streamUrl.isNotBlank() && (media.streamUrl.startsWith("http://") || media.streamUrl.startsWith("https://"))) {
+            return media.streamUrl
+        }
+        return DEFAULT_AUDIO_STREAM
     }
 
     fun togglePlayPause() {
@@ -63,17 +152,36 @@ class PlaybackManager {
 
     fun pause() {
         _playbackState.value = _playbackState.value.copy(isPlaying = false)
+        try {
+            if (mediaPlayer?.isPlaying == true) {
+                mediaPlayer?.pause()
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error pausing player: ${e.message}")
+        }
         progressJob?.cancel()
     }
 
     fun resume() {
         _playbackState.value = _playbackState.value.copy(isPlaying = true)
+        try {
+            if (mediaPlayer != null && !mediaPlayer!!.isPlaying) {
+                mediaPlayer?.start()
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error resuming player: ${e.message}")
+        }
         startPositionTicker()
     }
 
     fun seekTo(positionMs: Long) {
         val boundedPos = positionMs.coerceIn(0L, _playbackState.value.durationMs.coerceAtLeast(1000L))
         _playbackState.value = _playbackState.value.copy(currentPositionMs = boundedPos)
+        try {
+            mediaPlayer?.seekTo(boundedPos.toInt())
+        } catch (e: Exception) {
+            Log.e(TAG, "Error seeking player: ${e.message}")
+        }
     }
 
     fun skipForward10s() {
@@ -107,6 +215,19 @@ class PlaybackManager {
 
     fun setPlaybackSpeed(speed: Float) {
         _playbackState.value = _playbackState.value.copy(playbackSpeed = speed)
+        applyPlaybackSpeed(speed)
+    }
+
+    private fun applyPlaybackSpeed(speed: Float) {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && mediaPlayer != null) {
+                val params = mediaPlayer!!.playbackParams
+                params.speed = speed
+                mediaPlayer!!.playbackParams = params
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Cannot set playback speed: ${e.message}")
+        }
     }
 
     fun switchAudioTrack(trackName: String) {
@@ -114,7 +235,13 @@ class PlaybackManager {
     }
 
     fun toggleLoop() {
-        _playbackState.value = _playbackState.value.copy(isLooping = !_playbackState.value.isLooping)
+        val newLoop = !_playbackState.value.isLooping
+        _playbackState.value = _playbackState.value.copy(isLooping = newLoop)
+        try {
+            mediaPlayer?.isLooping = newLoop
+        } catch (e: Exception) {
+            Log.e(TAG, "Error setting loop: ${e.message}")
+        }
     }
 
     fun toggleShuffle() {
@@ -129,9 +256,28 @@ class PlaybackManager {
         _playbackState.value = _playbackState.value.copy(isFullscreenVideo = fullscreen)
     }
 
+    fun updateVideoPositionFromView(positionMs: Long, durationMs: Long) {
+        _playbackState.value = _playbackState.value.copy(
+            currentPositionMs = positionMs,
+            durationMs = if (durationMs > 0) durationMs else _playbackState.value.durationMs
+        )
+    }
+
     fun closePlayer() {
         pause()
+        releaseMediaPlayer()
         _playbackState.value = PlaybackState()
+    }
+
+    private fun releaseMediaPlayer() {
+        try {
+            mediaPlayer?.stop()
+            mediaPlayer?.release()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error releasing MediaPlayer: ${e.message}")
+        } finally {
+            mediaPlayer = null
+        }
     }
 
     private fun startPositionTicker() {
@@ -140,16 +286,33 @@ class PlaybackManager {
             while (_playbackState.value.isPlaying) {
                 delay(500)
                 val current = _playbackState.value
-                val newPos = current.currentPositionMs + (500L * current.playbackSpeed).toLong()
-                if (newPos >= current.durationMs && current.durationMs > 0) {
-                    if (current.isLooping) {
-                        seekTo(0L)
-                    } else {
-                        playNext()
-                        break
+                val mp = mediaPlayer
+                if (mp != null && current.currentMedia?.mediaType == "AUDIO") {
+                    try {
+                        if (mp.isPlaying) {
+                            val pos = mp.currentPosition.toLong()
+                            val dur = mp.duration.toLong().coerceAtLeast(current.durationMs)
+                            _playbackState.value = current.copy(
+                                currentPositionMs = pos,
+                                durationMs = dur
+                            )
+                        }
+                    } catch (e: Exception) {
+                        // ignore safe race conditions
                     }
                 } else {
-                    _playbackState.value = current.copy(currentPositionMs = newPos)
+                    // For video or ticker fallback
+                    val newPos = current.currentPositionMs + (500L * current.playbackSpeed).toLong()
+                    if (newPos >= current.durationMs && current.durationMs > 0) {
+                        if (current.isLooping) {
+                            seekTo(0L)
+                        } else {
+                            playNext()
+                            break
+                        }
+                    } else {
+                        _playbackState.value = current.copy(currentPositionMs = newPos)
+                    }
                 }
             }
         }

@@ -335,6 +335,16 @@ object KnownBanglaMediaCatalogue {
 
     val sampleTrending = listOf(
         KnownMeta(
+            videoId = "0e3GPea1Tyg",
+            title = "I Granted 100 Kids Their Biggest Wish!",
+            author = "MrBeast",
+            durationSeconds = 875L,
+            views = "১১০ মিলিয়ন ভিউজ",
+            uploadDate = "৩ সপ্তাহ আগে",
+            category = "all",
+            customThumb = "https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=600&auto=format&fit=crop"
+        ),
+        KnownMeta(
             videoId = "dQw4w9WgXcQ",
             title = "তুমি অন্য কারো সঙ্গে বেঁধো ঘর - মন ছুঁয়ে যাওয়া বাংলা গান",
             author = "বাংলা টিউনস স্টুডিও",

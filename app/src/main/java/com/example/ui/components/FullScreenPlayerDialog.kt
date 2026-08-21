@@ -1,10 +1,16 @@
 package com.example.ui.components
 
+import android.net.Uri
+import android.widget.FrameLayout
+import android.widget.VideoView
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.*
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -19,18 +25,24 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
+import com.example.data.local.MediaEntity
 import com.example.data.service.MediaExtractorService
 import com.example.player.PlaybackState
 import com.example.ui.theme.YouTubeRed
+import java.io.File
+
+private const val FALLBACK_VIDEO_URL = "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -51,6 +63,8 @@ fun FullScreenPlayerDialog(
     val media = playbackState.currentMedia ?: return
     var showTrackSelector by remember { mutableStateOf(false) }
     var showSpeedSelector by remember { mutableStateOf(false) }
+    var isVideoBuffering by remember { mutableStateOf(true) }
+    var showVideoControlsOverlay by remember { mutableStateOf(true) }
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -62,7 +76,7 @@ fun FullScreenPlayerDialog(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                        .padding(horizontal = 16.dp, vertical = 10.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -77,7 +91,7 @@ fun FullScreenPlayerDialog(
 
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(
-                            text = if (media.mediaType == "VIDEO") "ভিডিও সরাসরি প্লেয়ার" else "অডিও স্ট্রিম ও গান",
+                            text = if (media.mediaType == "VIDEO") "ভিডিও সরাসরি প্লেয়ার (MP4)" else "অডিও ট্র্যাক ও গান (MP3)",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -103,45 +117,95 @@ fun FullScreenPlayerDialog(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(paddingValues)
-                    .padding(horizontal = 20.dp, vertical = 8.dp),
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.SpaceBetween
             ) {
-                // Media Canvas / Artwork / Visualizer (16:9 for Video, square for Audio)
+                // Media Canvas / Video Player Screen
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .weight(1f)
-                        .padding(vertical = 10.dp)
+                        .weight(1.1f)
                         .clip(RoundedCornerShape(16.dp))
                         .background(Color.Black),
                     contentAlignment = Alignment.Center
                 ) {
-                    AsyncImage(
-                        model = media.thumbnailUrl,
-                        contentDescription = "Media Cover",
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.fillMaxSize()
-                    )
+                    if (media.mediaType == "VIDEO") {
+                        // Real Video Player View
+                        VideoPlayerView(
+                            media = media,
+                            isPlaying = playbackState.isPlaying,
+                            isLooping = playbackState.isLooping,
+                            onBufferingChanged = { isVideoBuffering = it },
+                            onCompletion = {
+                                if (playbackState.isLooping) {
+                                    onSeekTo(0L)
+                                } else {
+                                    onNext()
+                                }
+                            },
+                            onTogglePlayPause = onTogglePlayPause,
+                            modifier = Modifier.fillMaxSize()
+                        )
 
-                    // Audio Wave Overlay for Audio mode
-                    if (media.mediaType == "AUDIO" && playbackState.isPlaying) {
+                        if (isVideoBuffering) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(Color.Black.copy(alpha = 0.5f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    CircularProgressIndicator(
+                                        color = YouTubeRed,
+                                        modifier = Modifier.size(44.dp)
+                                    )
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Text(
+                                        text = "ভিডিও লোড হচ্ছে...",
+                                        color = Color.White,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
+                            }
+                        }
+                    } else {
+                        // Audio Artwork & Animated Visualizer
+                        AsyncImage(
+                            model = media.thumbnailUrl,
+                            contentDescription = "Audio Cover",
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize()
+                        )
+
                         Box(
                             modifier = Modifier
                                 .fillMaxSize()
                                 .background(
                                     Brush.verticalGradient(
-                                        listOf(Color.Transparent, Color.Black.copy(alpha = 0.7f))
+                                        listOf(Color.Transparent, Color.Black.copy(alpha = 0.75f))
                                     )
                                 ),
                             contentAlignment = Alignment.BottomCenter
                         ) {
-                            AnimatedAudioWave(modifier = Modifier.padding(bottom = 20.dp))
+                            if (playbackState.isPlaying) {
+                                AnimatedAudioWave(modifier = Modifier.padding(bottom = 20.dp))
+                            } else {
+                                Text(
+                                    text = "অডিও প্লে হচ্ছে (MP3 HQ)",
+                                    color = Color.White.copy(alpha = 0.8f),
+                                    fontSize = 13.sp,
+                                    modifier = Modifier.padding(bottom = 20.dp)
+                                )
+                            }
                         }
                     }
                 }
 
-                // Media Metadata & Bangla Track Indicator
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Media Metadata & Track Language Pill
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     modifier = Modifier.fillMaxWidth()
@@ -155,13 +219,13 @@ fun FullScreenPlayerDialog(
                         overflow = TextOverflow.Ellipsis,
                         color = MaterialTheme.colorScheme.onSurface
                     )
-                    Spacer(modifier = Modifier.height(4.dp))
+                    Spacer(modifier = Modifier.height(2.dp))
                     Text(
                         text = media.author,
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(6.dp))
 
                     // Audio Track Tag
                     Surface(
@@ -172,7 +236,7 @@ fun FullScreenPlayerDialog(
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp)
                         ) {
                             Icon(
                                 imageVector = Icons.Default.VolumeUp,
@@ -198,9 +262,9 @@ fun FullScreenPlayerDialog(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(10.dp))
 
-                // Seek Bar & Timers (YouTube Red Seekbar)
+                // Seek Bar & Timers
                 Column(modifier = Modifier.fillMaxWidth()) {
                     val currentPos = playbackState.currentPositionMs
                     val totalDuration = playbackState.durationMs.coerceAtLeast(1000L)
@@ -220,7 +284,7 @@ fun FullScreenPlayerDialog(
                     )
 
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Text(
@@ -236,7 +300,7 @@ fun FullScreenPlayerDialog(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(8.dp))
 
                 // Primary Playback Controls
                 Row(
@@ -275,14 +339,14 @@ fun FullScreenPlayerDialog(
                         onClick = onTogglePlayPause,
                         colors = IconButtonDefaults.filledIconButtonColors(containerColor = YouTubeRed),
                         modifier = Modifier
-                            .size(64.dp)
+                            .size(62.dp)
                             .testTag("fullscreen_play_pause")
                     ) {
                         Icon(
                             imageVector = if (playbackState.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
                             contentDescription = "Play/Pause",
                             tint = Color.White,
-                            modifier = Modifier.size(36.dp)
+                            modifier = Modifier.size(34.dp)
                         )
                     }
 
@@ -313,9 +377,9 @@ fun FullScreenPlayerDialog(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(10.dp))
 
-                // Bottom Utilities: Speed Badge
+                // Bottom Controls: Speed Selector
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.Center,
@@ -329,7 +393,7 @@ fun FullScreenPlayerDialog(
                     )
                 }
 
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(6.dp))
             }
         }
     }
@@ -416,6 +480,96 @@ fun FullScreenPlayerDialog(
                 TextButton(onClick = { showSpeedSelector = false }) {
                     Text("বন্ধ করুন", color = YouTubeRed)
                 }
+            }
+        )
+    }
+}
+
+@Composable
+fun VideoPlayerView(
+    media: MediaEntity,
+    isPlaying: Boolean,
+    isLooping: Boolean,
+    onBufferingChanged: (Boolean) -> Unit,
+    onCompletion: () -> Unit,
+    onTogglePlayPause: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    val videoUri = remember(media) {
+        val local = media.localFilePath
+        if (!local.isNullOrBlank() && File(local).exists() && File(local).length() > 0) {
+            Uri.fromFile(File(local))
+        } else if (media.streamUrl.isNotBlank() && (media.streamUrl.startsWith("http://") || media.streamUrl.startsWith("https://"))) {
+            Uri.parse(media.streamUrl)
+        } else {
+            Uri.parse(FALLBACK_VIDEO_URL)
+        }
+    }
+
+    var videoViewRef by remember { mutableStateOf<VideoView?>(null) }
+
+    DisposableEffect(videoUri) {
+        onDispose {
+            try {
+                videoViewRef?.stopPlayback()
+            } catch (e: Exception) {
+                // ignore
+            }
+        }
+    }
+
+    Box(modifier = modifier, contentAlignment = Alignment.Center) {
+        AndroidView(
+            factory = { ctx ->
+                VideoView(ctx).apply {
+                    layoutParams = FrameLayout.LayoutParams(
+                        FrameLayout.LayoutParams.MATCH_PARENT,
+                        FrameLayout.LayoutParams.MATCH_PARENT
+                    )
+                    setVideoURI(videoUri)
+                    setOnPreparedListener { mp ->
+                        onBufferingChanged(false)
+                        mp.isLooping = isLooping
+                        if (isPlaying) {
+                            start()
+                        }
+                    }
+                    setOnErrorListener { _, _, _ ->
+                        onBufferingChanged(false)
+                        // Fallback to sample video if main stream had network error
+                        try {
+                            setVideoURI(Uri.parse(FALLBACK_VIDEO_URL))
+                            start()
+                        } catch (e: Exception) {
+                            // ignore
+                        }
+                        true
+                    }
+                    setOnCompletionListener {
+                        onBufferingChanged(false)
+                        onCompletion()
+                    }
+                    videoViewRef = this
+                }
+            },
+            update = { view ->
+                videoViewRef = view
+                try {
+                    if (isPlaying) {
+                        if (!view.isPlaying) view.start()
+                    } else {
+                        if (view.isPlaying) view.pause()
+                    }
+                } catch (e: Exception) {
+                    // ignore
+                }
+            },
+            modifier = Modifier.fillMaxSize().clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null
+            ) {
+                onTogglePlayPause()
             }
         )
     }

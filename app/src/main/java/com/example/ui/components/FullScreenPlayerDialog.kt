@@ -1,0 +1,455 @@
+package com.example.ui.components
+
+import androidx.compose.animation.core.*
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import coil.compose.AsyncImage
+import com.example.data.service.MediaExtractorService
+import com.example.player.PlaybackState
+import com.example.ui.theme.AmberGold
+import com.example.ui.theme.CrimsonRed
+import com.example.ui.theme.EmeraldCyan
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun FullScreenPlayerDialog(
+    playbackState: PlaybackState,
+    onTogglePlayPause: () -> Unit,
+    onSeekTo: (Long) -> Unit,
+    onSkipForward: () -> Unit,
+    onSkipBackward: () -> Unit,
+    onNext: () -> Unit,
+    onPrevious: () -> Unit,
+    onSpeedChange: (Float) -> Unit,
+    onAudioTrackChange: (String) -> Unit,
+    onToggleLoop: () -> Unit,
+    onToggleShuffle: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    val media = playbackState.currentMedia ?: return
+    var showTrackSelector by remember { mutableStateOf(false) }
+    var showSpeedSelector by remember { mutableStateOf(false) }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Scaffold(
+            containerColor = MaterialTheme.colorScheme.background,
+            topBar = {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(onClick = onDismiss, modifier = Modifier.testTag("close_fullscreen_player")) {
+                        Icon(
+                            imageVector = Icons.Default.KeyboardArrowDown,
+                            contentDescription = "Minimize",
+                            modifier = Modifier.size(32.dp),
+                            tint = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            text = if (media.mediaType == "VIDEO") "ভিডিও সরাসরি স্ট্রিম" else "অফলাইন লিসেনিং ও মিউজিক",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            text = media.selectedQuality,
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = EmeraldCyan
+                        )
+                    }
+
+                    IconButton(onClick = { showTrackSelector = true }, modifier = Modifier.testTag("audio_track_switch_btn")) {
+                        Icon(
+                            imageVector = Icons.Default.Language,
+                            contentDescription = "Audio Track",
+                            tint = EmeraldCyan
+                        )
+                    }
+                }
+            }
+        ) { paddingValues ->
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(paddingValues)
+                    .padding(horizontal = 24.dp, vertical = 8.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.SpaceBetween
+            ) {
+                // Media Canvas / Artwork / Visualizer
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                        .padding(vertical = 12.dp)
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(Color.Black),
+                    contentAlignment = Alignment.Center
+                ) {
+                    AsyncImage(
+                        model = media.thumbnailUrl,
+                        contentDescription = "Media Cover",
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+
+                    // Audio Wave Overlay for Audio mode
+                    if (media.mediaType == "AUDIO" && playbackState.isPlaying) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(
+                                    Brush.verticalGradient(
+                                        listOf(Color.Transparent, Color.Black.copy(alpha = 0.7f))
+                                    )
+                                ),
+                            contentAlignment = Alignment.BottomCenter
+                        ) {
+                            AnimatedAudioWave(modifier = Modifier.padding(bottom = 20.dp))
+                        }
+                    }
+                }
+
+                // Media Metadata & Bangla Track Indicator
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = media.title,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = media.author,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // Audio Track Tag
+                    Surface(
+                        color = EmeraldCyan.copy(alpha = 0.15f),
+                        shape = RoundedCornerShape(20.dp),
+                        border = BorderStroke(1.dp, EmeraldCyan.copy(alpha = 0.5f)),
+                        modifier = Modifier.clickable { showTrackSelector = true }
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.VolumeUp,
+                                contentDescription = null,
+                                tint = EmeraldCyan,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "অডিও ট্র্যাক: ${playbackState.selectedAudioTrackName}",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = EmeraldCyan
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Icon(
+                                imageVector = Icons.Default.ArrowDropDown,
+                                contentDescription = null,
+                                tint = EmeraldCyan,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Seek Bar & Timers
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    val currentPos = playbackState.currentPositionMs
+                    val totalDuration = playbackState.durationMs.coerceAtLeast(1000L)
+                    val sliderValue = (currentPos.toFloat() / totalDuration.toFloat()).coerceIn(0f, 1f)
+
+                    Slider(
+                        value = sliderValue,
+                        onValueChange = { frac ->
+                            onSeekTo((frac * totalDuration).toLong())
+                        },
+                        colors = SliderDefaults.colors(
+                            thumbColor = CrimsonRed,
+                            activeTrackColor = CrimsonRed,
+                            inactiveTrackColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
+                        ),
+                        modifier = Modifier.fillMaxWidth().testTag("player_seek_slider")
+                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = MediaExtractorService.formatSeconds(currentPos / 1000L),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            text = MediaExtractorService.formatSeconds(totalDuration / 1000L),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Primary Playback Controls
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(onClick = onToggleShuffle) {
+                        Icon(
+                            imageVector = Icons.Default.Shuffle,
+                            contentDescription = "Shuffle",
+                            tint = if (playbackState.isShuffle) EmeraldCyan else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    IconButton(onClick = onPrevious) {
+                        Icon(
+                            imageVector = Icons.Default.SkipPrevious,
+                            contentDescription = "Previous",
+                            modifier = Modifier.size(32.dp),
+                            tint = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+
+                    IconButton(onClick = onSkipBackward) {
+                        Icon(
+                            imageVector = Icons.Default.Replay10,
+                            contentDescription = "Replay 10s",
+                            modifier = Modifier.size(28.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    // Main Play/Pause Button
+                    FilledIconButton(
+                        onClick = onTogglePlayPause,
+                        colors = IconButtonDefaults.filledIconButtonColors(containerColor = CrimsonRed),
+                        modifier = Modifier
+                            .size(64.dp)
+                            .testTag("fullscreen_play_pause")
+                    ) {
+                        Icon(
+                            imageVector = if (playbackState.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                            contentDescription = "Play/Pause",
+                            tint = Color.White,
+                            modifier = Modifier.size(36.dp)
+                        )
+                    }
+
+                    IconButton(onClick = onSkipForward) {
+                        Icon(
+                            imageVector = Icons.Default.Forward10,
+                            contentDescription = "Forward 10s",
+                            modifier = Modifier.size(28.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    IconButton(onClick = onNext) {
+                        Icon(
+                            imageVector = Icons.Default.SkipNext,
+                            contentDescription = "Next",
+                            modifier = Modifier.size(32.dp),
+                            tint = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+
+                    IconButton(onClick = onToggleLoop) {
+                        Icon(
+                            imageVector = Icons.Default.Repeat,
+                            contentDescription = "Loop",
+                            tint = if (playbackState.isLooping) EmeraldCyan else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Bottom Utilities: Speed Badge, Sleep Timer
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    FilterChip(
+                        selected = playbackState.playbackSpeed != 1.0f,
+                        onClick = { showSpeedSelector = true },
+                        label = { Text("গতি: ${playbackState.playbackSpeed}x") },
+                        leadingIcon = { Icon(Icons.Default.Speed, contentDescription = null, modifier = Modifier.size(16.dp)) }
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+            }
+        }
+    }
+
+    // Audio Track Selector Dialog
+    if (showTrackSelector) {
+        val tracks = listOf(
+            "বাংলা (Bengali - অডিও ট্র্যাক - ডিফল্ট)",
+            "হিন্দি (Hindi - ডাবিং অডিও)",
+            "অরিজিনাল (Original Track)",
+            "বাংলা লাইট (128 kbps দ্রুত ডাউনলোড)"
+        )
+        AlertDialog(
+            onDismissRequest = { showTrackSelector = false },
+            title = { Text("অডিও ট্র্যাক ভাষা নির্বাচন") },
+            text = {
+                Column {
+                    tracks.forEach { track ->
+                        val isSelected = playbackState.selectedAudioTrackName == track
+                        Surface(
+                            onClick = {
+                                onAudioTrackChange(track)
+                                showTrackSelector = false
+                            },
+                            shape = RoundedCornerShape(8.dp),
+                            color = if (isSelected) EmeraldCyan.copy(alpha = 0.15f) else Color.Transparent,
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                RadioButton(
+                                    selected = isSelected,
+                                    onClick = {
+                                        onAudioTrackChange(track)
+                                        showTrackSelector = false
+                                    },
+                                    colors = RadioButtonDefaults.colors(selectedColor = EmeraldCyan)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = track,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                    color = if (isSelected) EmeraldCyan else MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showTrackSelector = false }) {
+                    Text("ঠিক আছে")
+                }
+            }
+        )
+    }
+
+    // Speed Selector Dialog
+    if (showSpeedSelector) {
+        val speeds = listOf(0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f)
+        AlertDialog(
+            onDismissRequest = { showSpeedSelector = false },
+            title = { Text("প্লেব্যাক গতি নির্বাচন") },
+            text = {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceEvenly
+                ) {
+                    speeds.forEach { sp ->
+                        FilterChip(
+                            selected = playbackState.playbackSpeed == sp,
+                            onClick = {
+                                onSpeedChange(sp)
+                                showSpeedSelector = false
+                            },
+                            label = { Text("${sp}x") }
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showSpeedSelector = false }) {
+                    Text("বন্ধ করুন")
+                }
+            }
+        )
+    }
+}
+
+@Composable
+fun AnimatedAudioWave(modifier: Modifier = Modifier) {
+    val infiniteTransition = rememberInfiniteTransition(label = "wave")
+    val heights = (0..6).map { index ->
+        infiniteTransition.animateFloat(
+            initialValue = 8f,
+            targetValue = 32f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(durationMillis = 400 + (index * 80), easing = FastOutSlowInEasing),
+                repeatMode = RepeatMode.Reverse
+            ),
+            label = "bar_$index"
+        )
+    }
+
+    Row(
+        modifier = modifier,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalAlignment = Alignment.Bottom
+    ) {
+        heights.forEach { heightAnim ->
+            Box(
+                modifier = Modifier
+                    .width(4.dp)
+                    .height(heightAnim.value.dp)
+                    .background(EmeraldCyan, CircleShape)
+            )
+        }
+    }
+}

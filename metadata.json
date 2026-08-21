@@ -1,0 +1,6 @@
+{
+  "name": "BDTube Pro",
+  "description": "হালকা ও দ্রুত ইউটিউব ও সাউন্ডক্লাউড স্ক্র্যাপার, বাংলা অডিও ট্র্যাক সহ মাল্টি-রেজোলিউশন ডাউনলোড ও অফলাইন প্লেয়ার",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -242,16 +242,14 @@ fun FullScreenPlayerDialog(
                     )
 
                     // Visual Feedback for Double-Tap Rewind/Forward
-                    AnimatedVisibility(
-                        visible = doubleTapSide != null,
-                        enter = scaleIn() + fadeIn(),
-                        exit = scaleOut() + fadeOut(),
-                        modifier = Modifier.align(if (doubleTapSide == "left") Alignment.CenterStart else Alignment.CenterEnd)
-                    ) {
+                    if (doubleTapSide != null) {
                         Surface(
                             shape = CircleShape,
-                            color = Color.Black.copy(alpha = 0.7f),
-                            modifier = Modifier.padding(24.dp).size(68.dp)
+                            color = Color.Black.copy(alpha = 0.75f),
+                            modifier = Modifier
+                                .align(if (doubleTapSide == "left") Alignment.CenterStart else Alignment.CenterEnd)
+                                .padding(24.dp)
+                                .size(68.dp)
                         ) {
                             Column(
                                 horizontalAlignment = Alignment.CenterHorizontally,

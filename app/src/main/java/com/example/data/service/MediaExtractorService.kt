@@ -11,8 +11,13 @@ import java.util.regex.Pattern
 
 object MediaExtractorService {
 
-    private val YOUTUBE_REGEX = Pattern.compile(
-        "^.*(youtu.be/|v/|u/\\w/|embed/|watch\\?v=|&v=|shorts/)([^#&?]*).*",
+    private val YOUTUBE_ID_REGEX = Pattern.compile(
+        "(?:youtu\\.be\\/|youtube\\.com\\/(?:embed\\/|v\\/|watch\\?v=|watch\\?.+&v=|shorts\\/|live\\/))([a-zA-Z0-9_-]{11})",
+        Pattern.CASE_INSENSITIVE
+    )
+
+    private val GENERIC_URL_REGEX = Pattern.compile(
+        "https?://[\\w\\d:#@%/;$()~_?\\+-=\\\\\\.&]+",
         Pattern.CASE_INSENSITIVE
     )
 
@@ -31,21 +36,56 @@ object MediaExtractorService {
         }
     }
 
+    fun findMediaUrlInText(text: String): String? {
+        val trimmed = text.trim()
+        if (trimmed.isBlank() || isAdultOrRestrictedContent(trimmed)) return null
+
+        // 1. Direct YouTube ID matching anywhere in the text
+        val ytMatcher = YOUTUBE_ID_REGEX.matcher(trimmed)
+        if (ytMatcher.find()) {
+            val videoId = ytMatcher.group(1)
+            if (!videoId.isNullOrBlank()) {
+                return "https://www.youtube.com/watch?v=$videoId"
+            }
+        }
+
+        // 2. Exact 11 char YouTube ID
+        if (trimmed.length == 11 && trimmed.matches(Regex("^[a-zA-Z0-9_-]{11}$"))) {
+            return "https://www.youtube.com/watch?v=$trimmed"
+        }
+
+        // 3. Generic URL extraction
+        val urlMatcher = GENERIC_URL_REGEX.matcher(trimmed)
+        if (urlMatcher.find()) {
+            val extractedUrl = urlMatcher.group(0)
+            if (isSupportedUrl(extractedUrl)) {
+                return extractedUrl
+            }
+        }
+
+        return if (isSupportedUrl(trimmed)) trimmed else null
+    }
+
     fun isSupportedUrl(url: String): Boolean {
         val trimmed = url.trim()
         if (isAdultOrRestrictedContent(trimmed)) return false
-        return trimmed.contains("youtube.com") ||
-                trimmed.contains("youtu.be") ||
-                trimmed.contains("soundcloud.com") ||
-                trimmed.startsWith("http://") ||
-                trimmed.startsWith("https://")
+        return trimmed.contains("youtube.com", ignoreCase = true) ||
+                trimmed.contains("youtu.be", ignoreCase = true) ||
+                trimmed.contains("soundcloud.com", ignoreCase = true) ||
+                trimmed.startsWith("http://", ignoreCase = true) ||
+                trimmed.startsWith("https://", ignoreCase = true) ||
+                (trimmed.length == 11 && trimmed.matches(Regex("^[a-zA-Z0-9_-]{11}$")))
     }
 
     fun extractYouTubeId(url: String): String? {
-        val matcher = YOUTUBE_REGEX.matcher(url.trim())
-        return if (matcher.matches()) {
-            val id = matcher.group(2)
-            if (!id.isNullOrBlank() && id.length >= 6) id else null
+        val clean = url.trim()
+        if (clean.length == 11 && clean.matches(Regex("^[a-zA-Z0-9_-]{11}$"))) {
+            return clean
+        }
+        val matcher = YOUTUBE_ID_REGEX.matcher(clean)
+        return if (matcher.find()) {
+            val id = matcher.group(1)
+            if (!id.isNullOrBlank()) id else null
         } else null
     }
 

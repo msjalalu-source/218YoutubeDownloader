@@ -87,8 +87,8 @@ class MainViewModel(
         _uiState.value = _uiState.value.copy(activeCategoryFilter = category)
     }
 
-    fun checkClipboardForMediaLink(context: Context) {
-        if (!_uiState.value.autoClipboardEnabled) return
+    fun checkClipboardForMediaLink(context: Context, force: Boolean = false) {
+        if (!_uiState.value.autoClipboardEnabled && !force) return
 
         try {
             val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
@@ -96,22 +96,39 @@ class MainViewModel(
                 val clipData = clipboard.primaryClip
                 if (clipData != null && clipData.itemCount > 0) {
                     val item = clipData.getItemAt(0)
-                    val text = item.text?.toString()?.trim() ?: ""
+                    val rawText = item.text?.toString()?.trim() ?: ""
                     
-                    if (text.isNotBlank() && MediaExtractorService.isSupportedUrl(text)) {
-                        if (text != _uiState.value.lastDetectedClipboardUrl) {
+                    val detectedUrl = MediaExtractorService.findMediaUrlInText(rawText)
+                    if (!detectedUrl.isNullOrBlank()) {
+                        if (force || detectedUrl != _uiState.value.lastDetectedClipboardUrl) {
                             _uiState.value = _uiState.value.copy(
-                                lastDetectedClipboardUrl = text,
-                                inputUrlText = text
+                                lastDetectedClipboardUrl = detectedUrl,
+                                inputUrlText = detectedUrl
                             )
                             // Automatically extract and open download modal
-                            extractAndShowDownloadDialog(text, isAutoDetected = true)
+                            extractAndShowDownloadDialog(detectedUrl, isAutoDetected = true)
                         }
+                    } else if (force && rawText.isNotBlank()) {
+                        _uiState.value = _uiState.value.copy(
+                            inputUrlText = rawText,
+                            bannerMessage = "ক্লিপবোর্ডে কোনো বৈধ YouTube বা অডিও লিংক পাওয়া যায়নি।"
+                        )
                     }
                 }
             }
         } catch (e: Exception) {
             // Ignore clipboard permission nuances safely
+        }
+    }
+
+    fun processSharedLink(sharedText: String) {
+        val detectedUrl = MediaExtractorService.findMediaUrlInText(sharedText)
+        if (!detectedUrl.isNullOrBlank()) {
+            _uiState.value = _uiState.value.copy(
+                lastDetectedClipboardUrl = detectedUrl,
+                inputUrlText = detectedUrl
+            )
+            extractAndShowDownloadDialog(detectedUrl, isAutoDetected = true)
         }
     }
 

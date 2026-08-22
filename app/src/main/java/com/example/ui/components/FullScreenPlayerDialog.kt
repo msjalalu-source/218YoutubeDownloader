@@ -1,8 +1,16 @@
 package com.example.ui.components
 
+import android.graphics.SurfaceTexture
+import android.media.AudioAttributes
+import android.media.MediaPlayer
 import android.net.Uri
+import android.view.Surface
+import android.view.TextureView
+import android.webkit.WebChromeClient
+import android.webkit.WebSettings
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import android.widget.FrameLayout
-import android.widget.VideoView
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.*
 import androidx.compose.animation.fadeIn
@@ -708,79 +716,252 @@ fun VideoPlayerView(
     onCompletion: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val context = LocalContext.current
-    val videoUri = remember(media) {
-        val local = media.localFilePath
-        if (!local.isNullOrBlank() && File(local).exists() && File(local).length() > 0) {
-            Uri.fromFile(File(local))
-        } else if (media.streamUrl.isNotBlank() && (media.streamUrl.startsWith("http://") || media.streamUrl.startsWith("https://"))) {
-            Uri.parse(media.streamUrl)
-        } else {
-            Uri.parse(FALLBACK_VIDEO_URL)
+    val ytId = remember(media) { extractYouTubeIdFromMedia(media) }
+
+    if (!ytId.isNullOrBlank()) {
+        YouTubeEmbeddedPlayer(
+            videoId = ytId,
+            onBufferingChanged = onBufferingChanged,
+            modifier = modifier
+        )
+    } else {
+        val videoUri = remember(media) {
+            val local = media.localFilePath
+            if (!local.isNullOrBlank() && File(local).exists() && File(local).length() > 0) {
+                Uri.fromFile(File(local))
+            } else if (media.streamUrl.isNotBlank() && (media.streamUrl.startsWith("http://") || media.streamUrl.startsWith("https://"))) {
+                Uri.parse(media.streamUrl)
+            } else {
+                Uri.parse(FALLBACK_VIDEO_URL)
+            }
         }
+
+        TextureVideoPlayerView(
+            videoUri = videoUri,
+            isPlaying = isPlaying,
+            isLooping = isLooping,
+            onBufferingChanged = onBufferingChanged,
+            onCompletion = onCompletion,
+            modifier = modifier
+        )
+    }
+}
+
+fun extractYouTubeIdFromMedia(media: MediaEntity): String? {
+    // If local file exists, play offline file instead
+    if (!media.localFilePath.isNullOrBlank() && File(media.localFilePath).exists() && File(media.localFilePath).length() > 0) {
+        return null
+    }
+    val direct = MediaExtractorService.extractYouTubeId(media.originalUrl)
+    if (!direct.isNullOrBlank()) return direct
+
+    val idClean = media.id.removePrefix("stream_")
+    val idExtract = MediaExtractorService.extractYouTubeId(idClean)
+    if (!idExtract.isNullOrBlank()) return idExtract
+
+    if (idClean.length == 11 && idClean.matches(Regex("^[a-zA-Z0-9_-]{11}$"))) {
+        return idClean
+    }
+    if (media.originalUrl.length == 11 && media.originalUrl.matches(Regex("^[a-zA-Z0-9_-]{11}$"))) {
+        return media.originalUrl
+    }
+    val thumbRegex = Regex("/vi/([a-zA-Z0-9_-]+)/")
+    val match = thumbRegex.find(media.thumbnailUrl)
+    if (match != null) {
+        return match.groupValues[1]
+    }
+    return null
+}
+
+@Composable
+fun YouTubeEmbeddedPlayer(
+    videoId: String,
+    onBufferingChanged: (Boolean) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var webViewRef by remember { mutableStateOf<WebView?>(null) }
+
+    val htmlContent = remember(videoId) {
+        """
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+            <style>
+                * { box-sizing: border-box; margin: 0; padding: 0; }
+                html, body { width: 100%; height: 100%; background: #000; overflow: hidden; display: flex; justify-content: center; align-items: center; }
+                iframe { width: 100%; height: 100%; border: none; }
+            </style>
+        </head>
+        <body>
+            <iframe 
+                src="https://www.youtube-nocookie.com/embed/$videoId?autoplay=1&playsinline=1&controls=1&rel=0&modestbranding=1&enablejsapi=1" 
+                allow="autoplay; encrypted-media; picture-in-picture; accelerometer; gyroscope" 
+                allowfullscreen>
+            </iframe>
+        </body>
+        </html>
+        """.trimIndent()
     }
 
-    var videoViewRef by remember { mutableStateOf<VideoView?>(null) }
-
-    DisposableEffect(videoUri) {
+    DisposableEffect(videoId) {
         onDispose {
             try {
-                videoViewRef?.stopPlayback()
+                webViewRef?.let { wv ->
+                    wv.stopLoading()
+                    wv.loadUrl("about:blank")
+                    wv.destroy()
+                }
             } catch (e: Exception) {
                 // ignore
             }
         }
     }
 
-    Box(modifier = modifier, contentAlignment = Alignment.Center) {
-        AndroidView(
-            factory = { ctx ->
-                VideoView(ctx).apply {
-                    layoutParams = FrameLayout.LayoutParams(
-                        FrameLayout.LayoutParams.MATCH_PARENT,
-                        FrameLayout.LayoutParams.MATCH_PARENT
-                    )
-                    setVideoURI(videoUri)
-                    setOnPreparedListener { mp ->
-                        onBufferingChanged(false)
-                        mp.isLooping = isLooping
-                        if (isPlaying) {
-                            start()
+    AndroidView(
+        factory = { ctx ->
+            WebView(ctx).apply {
+                layoutParams = FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT
+                )
+                setBackgroundColor(0xFF000000.toInt())
+                settings.apply {
+                    javaScriptEnabled = true
+                    domStorageEnabled = true
+                    mediaPlaybackRequiresUserGesture = false
+                    loadWithOverviewMode = true
+                    useWideViewPort = true
+                    cacheMode = WebSettings.LOAD_DEFAULT
+                    allowContentAccess = true
+                    allowFileAccess = true
+                }
+                webChromeClient = object : WebChromeClient() {
+                    override fun onProgressChanged(view: WebView?, newProgress: Int) {
+                        if (newProgress >= 60) {
+                            onBufferingChanged(false)
                         }
                     }
-                    setOnErrorListener { _, _, _ ->
+                }
+                webViewClient = object : WebViewClient() {
+                    override fun onPageFinished(view: WebView?, url: String?) {
                         onBufferingChanged(false)
-                        // Fallback to sample video if main stream had network error
+                    }
+                }
+                loadDataWithBaseURL("https://www.youtube.com", htmlContent, "text/html", "UTF-8", null)
+                webViewRef = this
+            }
+        },
+        update = { wv ->
+            webViewRef = wv
+        },
+        modifier = modifier
+    )
+}
+
+@Composable
+fun TextureVideoPlayerView(
+    videoUri: Uri,
+    isPlaying: Boolean,
+    isLooping: Boolean,
+    onBufferingChanged: (Boolean) -> Unit,
+    onCompletion: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    var mediaPlayerRef by remember { mutableStateOf<MediaPlayer?>(null) }
+    var surfaceRef by remember { mutableStateOf<Surface?>(null) }
+
+    DisposableEffect(videoUri) {
+        onDispose {
+            try {
+                mediaPlayerRef?.stop()
+                mediaPlayerRef?.release()
+                mediaPlayerRef = null
+                surfaceRef?.release()
+                surfaceRef = null
+            } catch (e: Exception) {
+                // ignore
+            }
+        }
+    }
+
+    AndroidView(
+        factory = { ctx ->
+            TextureView(ctx).apply {
+                layoutParams = FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT
+                )
+                surfaceTextureListener = object : TextureView.SurfaceTextureListener {
+                    override fun onSurfaceTextureAvailable(st: SurfaceTexture, width: Int, height: Int) {
+                        val surface = Surface(st)
+                        surfaceRef = surface
                         try {
-                            setVideoURI(Uri.parse(FALLBACK_VIDEO_URL))
-                            start()
+                            val mp = MediaPlayer().apply {
+                                setSurface(surface)
+                                setDataSource(ctx, videoUri)
+                                setAudioAttributes(
+                                    AudioAttributes.Builder()
+                                        .setContentType(AudioAttributes.CONTENT_TYPE_MOVIE)
+                                        .setUsage(AudioAttributes.USAGE_MEDIA)
+                                        .build()
+                                )
+                                setOnPreparedListener { player ->
+                                    onBufferingChanged(false)
+                                    player.isLooping = isLooping
+                                    if (isPlaying) {
+                                        player.start()
+                                    }
+                                }
+                                setOnErrorListener { _, _, _ ->
+                                    onBufferingChanged(false)
+                                    true
+                                }
+                                setOnCompletionListener {
+                                    onBufferingChanged(false)
+                                    onCompletion()
+                                }
+                                prepareAsync()
+                            }
+                            mediaPlayerRef = mp
+                        } catch (e: Exception) {
+                            onBufferingChanged(false)
+                        }
+                    }
+
+                    override fun onSurfaceTextureSizeChanged(st: SurfaceTexture, width: Int, height: Int) {}
+                    override fun onSurfaceTextureDestroyed(st: SurfaceTexture): Boolean {
+                        try {
+                            mediaPlayerRef?.stop()
+                            mediaPlayerRef?.release()
+                            mediaPlayerRef = null
+                            surfaceRef?.release()
+                            surfaceRef = null
                         } catch (e: Exception) {
                             // ignore
                         }
-                        true
+                        return true
                     }
-                    setOnCompletionListener {
-                        onBufferingChanged(false)
-                        onCompletion()
-                    }
-                    videoViewRef = this
+                    override fun onSurfaceTextureUpdated(st: SurfaceTexture) {}
                 }
-            },
-            update = { view ->
-                videoViewRef = view
-                try {
-                    if (isPlaying) {
-                        if (!view.isPlaying) view.start()
-                    } else {
-                        if (view.isPlaying) view.pause()
+            }
+        },
+        update = {
+            try {
+                mediaPlayerRef?.let { mp ->
+                    if (isPlaying && !mp.isPlaying) {
+                        mp.start()
+                    } else if (!isPlaying && mp.isPlaying) {
+                        mp.pause()
                     }
-                } catch (e: Exception) {
-                    // ignore
                 }
-            },
-            modifier = Modifier.fillMaxSize()
-        )
-    }
+            } catch (e: Exception) {
+                // ignore
+            }
+        },
+        modifier = modifier
+    )
 }
 
 @Composable

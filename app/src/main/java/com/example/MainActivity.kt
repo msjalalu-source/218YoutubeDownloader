@@ -1,5 +1,8 @@
 package com.example
 
+import android.content.ClipboardManager
+import android.content.Context
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -43,8 +46,12 @@ import com.example.ui.screens.HomeScreen
 import com.example.ui.screens.SettingsScreen
 import com.example.ui.theme.MyApplicationTheme
 import com.example.ui.theme.YouTubeRed
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
+    private var mainViewModel: MainViewModel? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -58,7 +65,36 @@ class MainActivity : ComponentActivity() {
                 val viewModel: MainViewModel = viewModel {
                     MainViewModel(repository, playbackManager)
                 }
+                mainViewModel = viewModel
                 BDTubeMainApp(viewModel = viewModel)
+            }
+        }
+
+        handleIncomingIntent(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleIncomingIntent(intent)
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) {
+            mainViewModel?.checkClipboardForMediaLink(this)
+        }
+    }
+
+    private fun handleIncomingIntent(intent: Intent) {
+        if (intent.action == Intent.ACTION_SEND && intent.type?.startsWith("text/") == true) {
+            val sharedText = intent.getStringExtra(Intent.EXTRA_TEXT)
+            if (!sharedText.isNullOrBlank()) {
+                mainViewModel?.processSharedLink(sharedText)
+            }
+        } else if (intent.action == Intent.ACTION_VIEW) {
+            intent.dataString?.let { url ->
+                mainViewModel?.processSharedLink(url)
             }
         }
     }
@@ -69,6 +105,7 @@ class MainActivity : ComponentActivity() {
 fun BDTubeMainApp(viewModel: MainViewModel) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
+    val scope = rememberCoroutineScope()
 
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val completedDownloads by viewModel.completedDownloads.collectAsStateWithLifecycle()
@@ -78,15 +115,26 @@ fun BDTubeMainApp(viewModel: MainViewModel) {
 
     var showFullscreenPlayer by remember { mutableStateOf(false) }
 
-    // Automatic Clipboard Detection on App Resume / Launch
-    DisposableEffect(lifecycleOwner) {
+    // Automatic Clipboard Detection on App Resume / Launch / Clip Change
+    DisposableEffect(lifecycleOwner, context) {
+        val clipboardManager = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+        val clipListener = ClipboardManager.OnPrimaryClipChangedListener {
+            viewModel.checkClipboardForMediaLink(context)
+        }
+        clipboardManager?.addPrimaryClipChangedListener(clipListener)
+
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 viewModel.checkClipboardForMediaLink(context)
+                scope.launch {
+                    delay(300L)
+                    viewModel.checkClipboardForMediaLink(context)
+                }
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose {
+            clipboardManager?.removePrimaryClipChangedListener(clipListener)
             lifecycleOwner.lifecycle.removeObserver(observer)
         }
     }
@@ -309,7 +357,7 @@ fun BDTubeMainApp(viewModel: MainViewModel) {
                 0 -> HomeScreen(
                     uiState = uiState,
                     onUrlChanged = { viewModel.onUrlInputChanged(it) },
-                    onPasteFromClipboard = { viewModel.checkClipboardForMediaLink(context) },
+                    onPasteFromClipboard = { viewModel.checkClipboardForMediaLink(context, force = true) },
                     onExtractClicked = { viewModel.extractAndShowDownloadDialog() },
                     onCategoryChanged = { viewModel.setCategoryFilter(it) },
                     onSearchChanged = { viewModel.onSearchQueryChanged(it) },

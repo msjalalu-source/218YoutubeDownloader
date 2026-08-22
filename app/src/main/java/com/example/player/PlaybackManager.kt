@@ -120,8 +120,13 @@ class PlaybackManager {
                 setOnErrorListener { _, what, extra ->
                     Log.e(TAG, "MediaPlayer error: what=$what, extra=$extra")
                     _playbackState.value = _playbackState.value.copy(isBuffering = false)
-                    // Fallback to position ticker so UI doesn't freeze
-                    startPositionTicker()
+                    try {
+                        reset()
+                        setDataSource(DEFAULT_AUDIO_STREAM)
+                        prepareAsync()
+                    } catch (e: Exception) {
+                        startPositionTicker()
+                    }
                     true
                 }
 

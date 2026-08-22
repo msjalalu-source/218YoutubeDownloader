@@ -3,6 +3,7 @@ package com.example.ui
 import android.content.ClipDescription
 import android.content.ClipboardManager
 import android.content.Context
+import androidx.compose.runtime.Immutable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.local.MediaEntity
@@ -15,6 +16,7 @@ import com.example.data.repository.MediaRepository
 import com.example.data.service.MediaExtractorService
 import com.example.player.PlaybackManager
 import com.example.player.PlaybackState
+import com.example.ui.components.UserProfile
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -22,6 +24,11 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
+import com.example.recommendation.ChannelProfile
+import com.example.recommendation.MLRecommendationEngine
+import com.example.recommendation.UserInteractionProfile
+
+@Immutable
 data class MainUiState(
     val selectedTab: Int = 0, // 0: Home/Scraper, 1: Downloads, 2: Settings
     val inputUrlText: String = "",
@@ -32,9 +39,14 @@ data class MainUiState(
     val selectedVideoOption: VideoStreamOption? = null,
     val selectedAudioOption: AudioTrackOption? = null,
     val searchQuery: String = "",
-    val activeCategoryFilter: String = "all",
+    val isSearchOverlayOpen: Boolean = false,
+    val userProfile: UserProfile = UserProfile(),
+    val showAuthDialog: Boolean = false,
+    val activeCategoryFilter: String = "for_you", // Default to ML Personalized "For You"
+    val selectedChannelFilter: String? = null,
     val autoClipboardEnabled: Boolean = true,
     val prioritizeBanglaAudio: Boolean = true,
+    val isStrictSafeModeEnabled: Boolean = true,
     val lastDetectedClipboardUrl: String = "",
     val showCreatePlaylistDialog: Boolean = false,
     val showAddToPlaylistDialog: Boolean = false,
@@ -83,8 +95,50 @@ class MainViewModel(
         _uiState.value = _uiState.value.copy(searchQuery = query)
     }
 
+    val channels: StateFlow<List<ChannelProfile>> = MLRecommendationEngine.channels
+    val userInteractionProfile: StateFlow<UserInteractionProfile> = MLRecommendationEngine.interactionProfile
+
     fun setCategoryFilter(category: String) {
-        _uiState.value = _uiState.value.copy(activeCategoryFilter = category)
+        _uiState.value = _uiState.value.copy(
+            activeCategoryFilter = category,
+            selectedChannelFilter = null
+        )
+    }
+
+    fun setSelectedChannelFilter(channelName: String?) {
+        _uiState.value = _uiState.value.copy(
+            selectedChannelFilter = channelName,
+            activeCategoryFilter = if (channelName != null) "subscriptions" else _uiState.value.activeCategoryFilter
+        )
+    }
+
+    fun toggleSubscription(channelName: String) {
+        val isNowSubscribed = MLRecommendationEngine.toggleSubscription(channelName)
+        _uiState.value = _uiState.value.copy(
+            bannerMessage = if (isNowSubscribed) "$channelName সাবস্ক্রাইব করা হয়েছে! (ML অ্যালগরিদমে প্রায়োরিটি বৃদ্ধি)" else "$channelName আনসাবস্ক্রাইব করা হয়েছে"
+        )
+    }
+
+    fun toggleLike(videoId: String) {
+        val isLiked = MLRecommendationEngine.toggleLike(videoId)
+        _uiState.value = _uiState.value.copy(
+            bannerMessage = if (isLiked) "ভিডিওটি লাইক করা হয়েছে! (আপনার পছন্দ অনুযায়ী ফিড অপ্টিমাইজড)" else "লাইক প্রত্যাহার করা হয়েছে"
+        )
+    }
+
+    fun recordSkip(videoId: String) {
+        MLRecommendationEngine.recordSkipOrDislike(videoId)
+        _uiState.value = _uiState.value.copy(
+            bannerMessage = "স্কিপ হিস্ট্রি আপডেট করা হয়েছে (এই ধরনের কন্টেন্ট কম দেখানো হবে)"
+        )
+    }
+
+    fun recordComment(videoId: String) {
+        MLRecommendationEngine.recordComment(videoId)
+    }
+
+    fun recordWatchTime(videoId: String, category: String, author: String, watchedSeconds: Long, totalDuration: Long) {
+        MLRecommendationEngine.recordWatchProgress(videoId, category, author, watchedSeconds, totalDuration)
     }
 
     fun checkClipboardForMediaLink(context: Context, force: Boolean = false) {
@@ -351,7 +405,61 @@ class MainViewModel(
         _uiState.value = _uiState.value.copy(prioritizeBanglaAudio = enabled)
     }
 
+    fun toggleStrictSafeMode(enabled: Boolean) {
+        _uiState.value = _uiState.value.copy(
+            isStrictSafeModeEnabled = enabled,
+            bannerMessage = if (enabled) "আল্ট্রা সেফ মোড সক্রিয় করা হয়েছে (১৮+ সম্পূর্ণ নিষিদ্ধ)" else "স্ট্যান্ডার্ড ফিল্টার সক্রিয়"
+        )
+    }
+
+    fun openSearchOverlay() {
+        _uiState.value = _uiState.value.copy(isSearchOverlayOpen = true)
+    }
+
+    fun closeSearchOverlay() {
+        _uiState.value = _uiState.value.copy(isSearchOverlayOpen = false)
+    }
+
+    fun showAuthDialog() {
+        _uiState.value = _uiState.value.copy(showAuthDialog = true)
+    }
+
+    fun dismissAuthDialog() {
+        _uiState.value = _uiState.value.copy(showAuthDialog = false)
+    }
+
+    fun loginWithGoogle(email: String, displayName: String) {
+        _uiState.value = _uiState.value.copy(
+            userProfile = UserProfile(
+                email = email,
+                displayName = displayName,
+                isLoggedIn = true,
+                isPremium = true
+            ),
+            showAuthDialog = false,
+            bannerMessage = "Google অ্যাকাউন্ট ($email) সফলভাবে সংযুক্ত হয়েছে!"
+        )
+    }
+
+    fun logout() {
+        _uiState.value = _uiState.value.copy(
+            userProfile = UserProfile(
+                email = "",
+                displayName = "Guest User",
+                isLoggedIn = false,
+                isPremium = false
+            ),
+            showAuthDialog = false,
+            bannerMessage = "অ্যাকাউন্ট লগআউট করা হয়েছে।"
+        )
+    }
+
     fun clearBanner() {
         _uiState.value = _uiState.value.copy(bannerMessage = null)
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        playbackManager.closePlayer()
     }
 }

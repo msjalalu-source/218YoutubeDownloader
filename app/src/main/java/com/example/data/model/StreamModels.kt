@@ -1,5 +1,8 @@
 package com.example.data.model
 
+import androidx.compose.runtime.Immutable
+
+@Immutable
 data class VideoDetails(
     val id: String,
     val title: String,
@@ -22,6 +25,7 @@ enum class PlatformType(val displayName: String, val badgeColorHex: Long) {
     DIRECT("Direct Stream", 0xFF00E5A3)
 }
 
+@Immutable
 data class VideoStreamOption(
     val id: String,
     val qualityLabel: String, // e.g. "1080p Full HD", "720p HD", "480p", "360p", "240p"
@@ -34,6 +38,7 @@ data class VideoStreamOption(
     val isHd: Boolean = false
 )
 
+@Immutable
 data class AudioTrackOption(
     val id: String,
     val languageCode: String, // "bn", "en", "hi", "orig"
@@ -45,6 +50,7 @@ data class AudioTrackOption(
     val directAudioUrl: String
 )
 
+@Immutable
 data class SearchCategory(
     val id: String,
     val titleBn: String,

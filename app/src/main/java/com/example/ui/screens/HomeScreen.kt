@@ -19,22 +19,30 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.service.KnownBanglaMediaCatalogue
 import com.example.data.service.MediaExtractorService
+import com.example.recommendation.ChannelProfile
+import com.example.recommendation.MLRecommendationEngine
+import com.example.recommendation.ScoredMedia
 import com.example.ui.MainUiState
-import com.example.ui.components.YouTubeFilterChips
+import com.example.ui.components.SubscriptionsStoryBar
 import com.example.ui.components.YouTubeVideoFeedCard
 import com.example.ui.theme.YouTubeRed
 
 @Composable
 fun HomeScreen(
     uiState: MainUiState,
-    onUrlChanged: (String) -> Unit,
-    onPasteFromClipboard: () -> Unit,
-    onExtractClicked: () -> Unit,
+    channels: List<ChannelProfile>,
+    onUrlChanged: (String) -> Unit = {},
+    onPasteFromClipboard: () -> Unit = {},
+    onExtractClicked: () -> Unit = {},
     onCategoryChanged: (String) -> Unit = {},
+    onSelectChannel: (String?) -> Unit = {},
+    onToggleSubscribe: (String) -> Unit = {},
+    onToggleLike: (String) -> Unit = {},
     onSearchChanged: (String) -> Unit = {},
     onTrendingItemClicked: (videoId: String, title: String) -> Unit = { _, _ -> },
     onClearBanner: () -> Unit,
@@ -45,24 +53,32 @@ fun HomeScreen(
         MediaExtractorService.isAdultOrRestrictedContent(uiState.searchQuery)
     }
 
-    val allVideos = KnownBanglaMediaCatalogue.sampleTrending
-    val filteredVideos = remember(uiState.activeCategoryFilter, uiState.searchQuery, isSearchAdultRestricted) {
+    // Dynamic ML-Ranked Feed based on watch time, likes, comments, and subscriptions
+    val interactionProfile by MLRecommendationEngine.interactionProfile.collectAsState()
+
+    val rankedVideos: List<ScoredMedia> = remember(
+        uiState.activeCategoryFilter,
+        uiState.selectedChannelFilter,
+        uiState.searchQuery,
+        interactionProfile,
+        isSearchAdultRestricted
+    ) {
         if (isSearchAdultRestricted) {
             emptyList()
         } else {
-            allVideos.filter { video ->
-                val matchesCategory = when (uiState.activeCategoryFilter) {
-                    "all" -> true
-                    "bangla_hits" -> video.category == "bangla_hits"
-                    "podcasts" -> video.category == "podcasts"
-                    "islamic" -> video.category == "islamic"
-                    "soundcloud" -> video.category == "soundcloud"
-                    else -> true
+            val baseFeed = MLRecommendationEngine.getRankedHomeFeed(
+                categoryFilter = uiState.activeCategoryFilter,
+                selectedChannelFilter = uiState.selectedChannelFilter
+            )
+
+            if (uiState.searchQuery.isBlank()) {
+                baseFeed
+            } else {
+                baseFeed.filter { item ->
+                    item.meta.title.contains(uiState.searchQuery, ignoreCase = true) ||
+                    item.meta.author.contains(uiState.searchQuery, ignoreCase = true) ||
+                    item.meta.category.contains(uiState.searchQuery, ignoreCase = true)
                 }
-                val matchesSearch = uiState.searchQuery.isBlank() ||
-                        video.title.contains(uiState.searchQuery, ignoreCase = true) ||
-                        video.author.contains(uiState.searchQuery, ignoreCase = true)
-                matchesCategory && matchesSearch
             }
         }
     }
@@ -73,137 +89,7 @@ fun HomeScreen(
             .background(MaterialTheme.colorScheme.background),
         contentPadding = PaddingValues(bottom = 90.dp)
     ) {
-        // 1. YouTube-style Smart Link Paste & Search Bar
-        item {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 6.dp)
-            ) {
-                Surface(
-                    shape = RoundedCornerShape(24.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant,
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 4.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Search,
-                            contentDescription = "Search",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(22.dp)
-                        )
-
-                        TextField(
-                            value = uiState.inputUrlText,
-                            onValueChange = {
-                                onUrlChanged(it)
-                                onSearchChanged(it)
-                            },
-                            placeholder = {
-                                Text(
-                                    text = "YouTube বা SoundCloud লিঙ্ক পেস্ট করুন...",
-                                    fontSize = 13.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
-                                )
-                            },
-                            singleLine = true,
-                            colors = TextFieldDefaults.colors(
-                                focusedContainerColor = Color.Transparent,
-                                unfocusedContainerColor = Color.Transparent,
-                                focusedIndicatorColor = Color.Transparent,
-                                unfocusedIndicatorColor = Color.Transparent,
-                                cursorColor = YouTubeRed,
-                                focusedTextColor = MaterialTheme.colorScheme.onSurface,
-                                unfocusedTextColor = MaterialTheme.colorScheme.onSurface
-                            ),
-                            modifier = Modifier
-                                .weight(1f)
-                                .testTag("url_input_field")
-                        )
-
-                        if (uiState.inputUrlText.isNotBlank()) {
-                            IconButton(onClick = {
-                                onUrlChanged("")
-                                onSearchChanged("")
-                            }) {
-                                Icon(
-                                    Icons.Default.Clear,
-                                    contentDescription = "Clear",
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-                        }
-
-                        // Direct Clipboard Paste Button
-                        Surface(
-                            onClick = onPasteFromClipboard,
-                            shape = CircleShape,
-                            color = MaterialTheme.colorScheme.surface,
-                            modifier = Modifier
-                                .size(34.dp)
-                                .testTag("paste_clipboard_button")
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    imageVector = Icons.Default.ContentPaste,
-                                    contentDescription = "Paste",
-                                    tint = YouTubeRed,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.width(6.dp))
-
-                        // Extract / Download Action Pill
-                        Button(
-                            onClick = onExtractClicked,
-                            enabled = !uiState.isExtracting && uiState.inputUrlText.isNotBlank(),
-                            shape = RoundedCornerShape(18.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = YouTubeRed,
-                                disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant
-                            ),
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                            modifier = Modifier
-                                .height(34.dp)
-                                .testTag("extract_media_button")
-                        ) {
-                            if (uiState.isExtracting) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(16.dp),
-                                    color = Color.White,
-                                    strokeWidth = 2.dp
-                                )
-                            } else {
-                                Icon(
-                                    Icons.Default.Download,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(15.dp),
-                                    tint = Color.White
-                                )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text(
-                                    text = "ডাউনলোড",
-                                    fontSize = 11.5.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color.White
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // 2. Banner notification if active
+        // Banner notification if active
         if (uiState.bannerMessage != null) {
             item {
                 Surface(
@@ -255,11 +141,13 @@ fun HomeScreen(
             }
         }
 
-        // 3. YouTube Category / Filter Chips
+        // Subscriptions Feed Story / Channel Bar
         item {
-            YouTubeFilterChips(
-                selectedCategory = uiState.activeCategoryFilter,
-                onSelectCategory = onCategoryChanged
+            SubscriptionsStoryBar(
+                channels = channels,
+                selectedChannelName = uiState.selectedChannelFilter,
+                onSelectChannel = onSelectChannel,
+                onToggleSubscribe = onToggleSubscribe
             )
         }
 
@@ -272,10 +160,10 @@ fun HomeScreen(
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.5f)),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 8.dp)
+                        .padding(16.dp)
                 ) {
                     Column(
-                        modifier = Modifier.padding(16.dp),
+                        modifier = Modifier.padding(20.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         Icon(
@@ -286,31 +174,33 @@ fun HomeScreen(
                         )
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            text = "এডাল্ট ও ১৮+ কন্টেন্ট সম্পূর্ণ নিষিদ্ধ",
+                            text = "১৮+ ও প্রাপ্তবয়স্ক কন্টেন্ট রেস্ট্রিক্টেড",
                             fontWeight = FontWeight.Bold,
-                            fontSize = 14.sp,
+                            fontSize = 15.sp,
                             color = MaterialTheme.colorScheme.onErrorContainer
                         )
-                        Spacer(modifier = Modifier.height(4.dp))
+                        Spacer(modifier = Modifier.height(6.dp))
                         Text(
-                            text = "এই অ্যাপটিতে ১৮+ বা প্রাপ্তবয়স্ক কন্টেন্ট রেস্ট্রিক্টেড করা হয়েছে। অনুগ্রহ করে পারিবারিক বা শিক্ষণীয় কন্টেন্ট অনুসন্ধান করুন।",
-                            fontSize = 12.sp,
+                            text = "ফ্যামিলি সেফ মোড ও এআই সেফটি শিল্ড সক্রিয় রয়েছে। কোনো অনুপযুক্ত বা ১৮+ ফলাফল প্রদর্শন করা হবে না।",
+                            fontSize = 12.5.sp,
                             color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.8f),
-                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                            textAlign = TextAlign.Center
                         )
                     }
                 }
             }
-        }
-
-        // 4. YouTube Video Feed Cards (All full length regular videos, No Shorts)
-        if (filteredVideos.isNotEmpty()) {
-            items(filteredVideos) { item ->
+        } else if (rankedVideos.isNotEmpty()) {
+            items(rankedVideos, key = { it.meta.videoId }) { scoredItem ->
                 YouTubeVideoFeedCard(
-                    item = item,
-                    onCardClick = { onTrendingItemClicked(item.videoId, item.title) },
-                    onDownloadClick = { onTrendingItemClicked(item.videoId, item.title) },
-                    onPlayAudioClick = { onTrendingItemClicked(item.videoId, item.title) }
+                    item = scoredItem.meta,
+                    recommendationReason = scoredItem.recommendationReason,
+                    isSubscribedChannel = scoredItem.isSubscribedChannel,
+                    isLiked = scoredItem.isLiked,
+                    onCardClick = { onTrendingItemClicked(scoredItem.meta.videoId, scoredItem.meta.title) },
+                    onDownloadClick = { onTrendingItemClicked(scoredItem.meta.videoId, scoredItem.meta.title) },
+                    onPlayAudioClick = { onTrendingItemClicked(scoredItem.meta.videoId, scoredItem.meta.title) },
+                    onToggleLike = { onToggleLike(scoredItem.meta.videoId) },
+                    onToggleSubscribe = { onToggleSubscribe(scoredItem.meta.author) }
                 )
                 Divider(
                     color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f),
@@ -318,7 +208,7 @@ fun HomeScreen(
                     modifier = Modifier.padding(vertical = 4.dp)
                 )
             }
-        } else if (!isSearchAdultRestricted && uiState.searchQuery.isNotBlank()) {
+        } else if (!isSearchAdultRestricted) {
             item {
                 Box(
                     modifier = Modifier
@@ -326,11 +216,20 @@ fun HomeScreen(
                         .padding(32.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text(
-                        text = "কোনো ভিডিও পাওয়া যায়নি",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(
+                            imageVector = Icons.Default.Subscriptions,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                            modifier = Modifier.size(48.dp)
+                        )
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Text(
+                            text = if (uiState.activeCategoryFilter == "subscriptions") "আপনার কোনো সাবস্ক্রাইব করা চ্যানেলের ভিডিও নেই" else "কোনো ভিডিও পাওয়া যায়নি",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
             }
         }

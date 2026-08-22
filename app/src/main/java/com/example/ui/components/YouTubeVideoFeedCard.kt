@@ -1,5 +1,6 @@
 package com.example.ui.components
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -34,6 +35,11 @@ fun YouTubeVideoFeedCard(
     onCardClick: () -> Unit,
     onDownloadClick: () -> Unit,
     onPlayAudioClick: () -> Unit = {},
+    recommendationReason: String? = null,
+    isSubscribedChannel: Boolean = false,
+    isLiked: Boolean = false,
+    onToggleLike: (() -> Unit)? = null,
+    onToggleSubscribe: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     var showMenu by remember { mutableStateOf(false) }
@@ -131,6 +137,52 @@ fun YouTubeVideoFeedCard(
                         modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
                     )
                 }
+
+                if (isSubscribedChannel) {
+                    Surface(
+                        color = Color(0xFF2E7D32).copy(alpha = 0.9f),
+                        shape = RoundedCornerShape(4.dp)
+                    ) {
+                        Text(
+                            text = "সাবস্ক্রাইবড",
+                            color = Color.White,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                        )
+                    }
+                }
+            }
+
+            // Top Right ML Reason Badge if available
+            if (!recommendationReason.isNullOrBlank()) {
+                Surface(
+                    color = Color(0xFF1E1E1E).copy(alpha = 0.85f),
+                    shape = RoundedCornerShape(4.dp),
+                    border = BorderStroke(0.5.dp, YouTubeRed.copy(alpha = 0.6f)),
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(8.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.AutoAwesome,
+                            contentDescription = null,
+                            tint = YouTubeRed,
+                            modifier = Modifier.size(11.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = recommendationReason,
+                            color = Color.White,
+                            fontSize = 9.5.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
             }
         }
 
@@ -138,7 +190,7 @@ fun YouTubeVideoFeedCard(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 12.dp),
+                .padding(horizontal = 12.dp, vertical = 10.dp),
             verticalAlignment = Alignment.Top
         ) {
             // Channel Avatar Circle
@@ -151,7 +203,8 @@ fun YouTubeVideoFeedCard(
                         Brush.linearGradient(
                             colors = listOf(YouTubeRed, Color(0xFF8A0000))
                         )
-                    ),
+                    )
+                    .clickable { onToggleSubscribe?.invoke() },
                 contentAlignment = Alignment.Center
             ) {
                 Text(
@@ -188,6 +241,21 @@ fun YouTubeVideoFeedCard(
             }
 
             Spacer(modifier = Modifier.width(6.dp))
+
+            // Like / Favorite Toggle
+            IconButton(
+                onClick = { onToggleLike?.invoke() },
+                modifier = Modifier
+                    .size(36.dp)
+                    .testTag("btn_like_${item.videoId}")
+            ) {
+                Icon(
+                    imageVector = if (isLiked) Icons.Default.Favorite else Icons.Outlined.FavoriteBorder,
+                    contentDescription = "Like",
+                    tint = if (isLiked) YouTubeRed else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
 
             // Direct 1-Tap Quick Download Button
             IconButton(
@@ -244,6 +312,16 @@ fun YouTubeVideoFeedCard(
                         }
                     )
                     DropdownMenuItem(
+                        text = { Text(if (isSubscribedChannel) "চ্যানেল আনসাবস্ক্রাইব করুন" else "চ্যানেল সাবস্ক্রাইব করুন") },
+                        leadingIcon = {
+                            Icon(Icons.Default.Subscriptions, contentDescription = null, tint = YouTubeRed)
+                        },
+                        onClick = {
+                            showMenu = false
+                            onToggleSubscribe?.invoke()
+                        }
+                    )
+                    DropdownMenuItem(
                         text = { Text("বাংলা অডিও শুনুন") },
                         leadingIcon = {
                             Icon(Icons.Default.Headphones, contentDescription = null)
@@ -251,15 +329,6 @@ fun YouTubeVideoFeedCard(
                         onClick = {
                             showMenu = false
                             onPlayAudioClick()
-                        }
-                    )
-                    DropdownMenuItem(
-                        text = { Text("লিঙ্ক কপি করুন") },
-                        leadingIcon = {
-                            Icon(Icons.Default.Share, contentDescription = null)
-                        },
-                        onClick = {
-                            showMenu = false
                         }
                     )
                 }

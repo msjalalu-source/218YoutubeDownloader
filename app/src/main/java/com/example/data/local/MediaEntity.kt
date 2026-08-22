@@ -1,9 +1,19 @@
 package com.example.data.local
 
+import androidx.compose.runtime.Immutable
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
 
-@Entity(tableName = "downloaded_media")
+@Immutable
+@Entity(
+    tableName = "downloaded_media",
+    indices = [
+        Index(value = ["downloadStatus"]),
+        Index(value = ["isFavorite"]),
+        Index(value = ["createdAt"])
+    ]
+)
 data class MediaEntity(
     @PrimaryKey val id: String,
     val title: String,
@@ -28,7 +38,13 @@ data class MediaEntity(
     val lastPlayedPositionMs: Long = 0L
 )
 
-@Entity(tableName = "playlists")
+@Immutable
+@Entity(
+    tableName = "playlists",
+    indices = [
+        Index(value = ["createdAt"])
+    ]
+)
 data class PlaylistEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0L,
     val name: String,
@@ -38,7 +54,16 @@ data class PlaylistEntity(
     val createdAt: Long = System.currentTimeMillis()
 )
 
-@Entity(tableName = "playlist_items", primaryKeys = ["playlistId", "mediaId"])
+@Immutable
+@Entity(
+    tableName = "playlist_items",
+    primaryKeys = ["playlistId", "mediaId"],
+    indices = [
+        Index(value = ["playlistId"]),
+        Index(value = ["mediaId"]),
+        Index(value = ["addedAt"])
+    ]
+)
 data class PlaylistItemCrossRef(
     val playlistId: Long,
     val mediaId: String,

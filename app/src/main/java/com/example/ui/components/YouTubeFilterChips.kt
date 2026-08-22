@@ -31,14 +31,13 @@ fun YouTubeFilterChips(
     modifier: Modifier = Modifier
 ) {
     val categories = listOf(
+        FilterChipData("for_you", "🔥 আপনার জন্য (AI)"),
+        FilterChipData("subscriptions", "📺 সাবস্ক্রিপশন ফিড"),
         FilterChipData("all", "সবগুলো"),
         FilterChipData("bangla_hits", "বাংলা গান"),
-        FilterChipData("podcasts", "পডকাস্ট"),
         FilterChipData("islamic", "ইসলামিক নাশিদ"),
-        FilterChipData("soundcloud", "সাউন্ডক্লাউড"),
-        FilterChipData("sd_480p", "480p SD"),
-        FilterChipData("audio_remix", "অডিও রিমিক্স"),
-        FilterChipData("new_releases", "নতুন রিলিজ")
+        FilterChipData("podcasts", "পডকাস্ট"),
+        FilterChipData("soundcloud", "সাউন্ডক্লাউড")
     )
 
     LazyRow(

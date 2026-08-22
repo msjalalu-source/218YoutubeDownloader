@@ -39,8 +39,10 @@ import com.example.data.repository.MediaRepository
 import com.example.player.PlaybackManager
 import com.example.ui.MainViewModel
 import com.example.ui.components.FullScreenPlayerDialog
+import com.example.ui.components.GoogleSignInDialog
 import com.example.ui.components.MiniPlayerBar
 import com.example.ui.components.QuickDownloadBottomSheet
+import com.example.ui.components.YouTubeSearchOverlay
 import com.example.ui.screens.DownloadsScreen
 import com.example.ui.screens.HomeScreen
 import com.example.ui.screens.SettingsScreen
@@ -86,6 +88,11 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onDestroy() {
+        super.onDestroy()
+        mainViewModel = null
+    }
+
     private fun handleIncomingIntent(intent: Intent) {
         if (intent.action == Intent.ACTION_SEND && intent.type?.startsWith("text/") == true) {
             val sharedText = intent.getStringExtra(Intent.EXTRA_TEXT)
@@ -112,6 +119,7 @@ fun BDTubeMainApp(viewModel: MainViewModel) {
     val activeDownloads by viewModel.activeDownloads.collectAsStateWithLifecycle()
     val playlists by viewModel.playlists.collectAsStateWithLifecycle()
     val playbackState by viewModel.playbackState.collectAsStateWithLifecycle()
+    val channels by viewModel.channels.collectAsStateWithLifecycle()
 
     var showFullscreenPlayer by remember { mutableStateOf(false) }
 
@@ -200,9 +208,9 @@ fun BDTubeMainApp(viewModel: MainViewModel) {
                         )
                     }
 
-                    // YouTube Search Icon
+                    // YouTube Search Icon (Opens real YouTube Search Overlay)
                     IconButton(
-                        onClick = { viewModel.setTab(0) },
+                        onClick = { viewModel.openSearchOverlay() },
                         modifier = Modifier.testTag("top_bar_search_icon")
                     ) {
                         Icon(
@@ -212,22 +220,23 @@ fun BDTubeMainApp(viewModel: MainViewModel) {
                         )
                     }
 
-                    // YouTube Profile Avatar Circle
+                    // YouTube Profile Avatar Circle (Opens Google Account Dialog)
                     Box(
                         modifier = Modifier
                             .padding(end = 12.dp, start = 4.dp)
-                            .size(30.dp)
+                            .size(32.dp)
                             .clip(CircleShape)
                             .background(
                                 Brush.linearGradient(
                                     colors = listOf(YouTubeRed, Color(0xFF8A0000))
                                 )
                             )
-                            .clickable { viewModel.setTab(2) },
+                            .clickable { viewModel.showAuthDialog() }
+                            .testTag("top_bar_profile_icon"),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = "B",
+                            text = uiState.userProfile.displayName.firstOrNull()?.uppercase() ?: "G",
                             color = Color.White,
                             fontWeight = FontWeight.Bold,
                             fontSize = 13.sp
@@ -356,10 +365,14 @@ fun BDTubeMainApp(viewModel: MainViewModel) {
             when (uiState.selectedTab) {
                 0 -> HomeScreen(
                     uiState = uiState,
+                    channels = channels,
                     onUrlChanged = { viewModel.onUrlInputChanged(it) },
                     onPasteFromClipboard = { viewModel.checkClipboardForMediaLink(context, force = true) },
                     onExtractClicked = { viewModel.extractAndShowDownloadDialog() },
                     onCategoryChanged = { viewModel.setCategoryFilter(it) },
+                    onSelectChannel = { viewModel.setSelectedChannelFilter(it) },
+                    onToggleSubscribe = { viewModel.toggleSubscription(it) },
+                    onToggleLike = { viewModel.toggleLike(it) },
                     onSearchChanged = { viewModel.onSearchQueryChanged(it) },
                     onTrendingItemClicked = { videoId, _ ->
                         viewModel.extractAndShowDownloadDialog("https://youtu.be/$videoId")
@@ -385,10 +398,52 @@ fun BDTubeMainApp(viewModel: MainViewModel) {
                 2 -> SettingsScreen(
                     uiState = uiState,
                     onToggleAutoClipboard = { viewModel.toggleAutoClipboard(it) },
-                    onToggleBanglaPriority = { viewModel.togglePrioritizeBanglaAudio(it) }
+                    onToggleBanglaPriority = { viewModel.togglePrioritizeBanglaAudio(it) },
+                    onToggleStrictSafeMode = { viewModel.toggleStrictSafeMode(it) },
+                    onOpenAuthDialog = { viewModel.showAuthDialog() }
                 )
             }
         }
+    }
+
+    // Interactive Full YouTube Search Overlay
+    if (uiState.isSearchOverlayOpen) {
+        YouTubeSearchOverlay(
+            searchQuery = uiState.searchQuery,
+            onQueryChange = {
+                viewModel.onSearchQueryChanged(it)
+                viewModel.onUrlInputChanged(it)
+            },
+            onSearchSubmit = { query ->
+                viewModel.onSearchQueryChanged(query)
+                viewModel.onUrlInputChanged(query)
+                viewModel.setTab(0)
+                if (query.startsWith("http://") || query.startsWith("https://") || query.contains("youtu")) {
+                    viewModel.extractAndShowDownloadDialog(query)
+                }
+            },
+            onClose = { viewModel.closeSearchOverlay() },
+            onSelectVideo = { videoId, _ ->
+                viewModel.extractAndShowDownloadDialog("https://youtu.be/$videoId")
+            },
+            onSelectAudio = { videoId, _ ->
+                viewModel.extractAndShowDownloadDialog("https://youtu.be/$videoId")
+            }
+        )
+    }
+
+    // Google Account & Gmail Login Dialog
+    if (uiState.showAuthDialog) {
+        GoogleSignInDialog(
+            userProfile = uiState.userProfile,
+            onDismiss = { viewModel.dismissAuthDialog() },
+            onLoginSuccess = { email, name ->
+                viewModel.loginWithGoogle(email, name)
+            },
+            onLogout = {
+                viewModel.logout()
+            }
+        )
     }
 
     // Modal: Quick Download & Stream Dialog (with Bengali Track First Priority & NewPipe Style Dialog)
@@ -428,6 +483,13 @@ fun BDTubeMainApp(viewModel: MainViewModel) {
             onSleepTimerChange = { viewModel.playbackManager.setSleepTimer(it) },
             onToggleLoop = { viewModel.playbackManager.toggleLoop() },
             onToggleShuffle = { viewModel.playbackManager.toggleShuffle() },
+            onPlayMediaItem = { videoId, title ->
+                viewModel.extractAndShowDownloadDialog("https://youtu.be/$videoId")
+            },
+            onToggleSubscribe = { viewModel.toggleSubscription(it) },
+            onToggleLike = { viewModel.toggleLike(it) },
+            onRecordSkip = { viewModel.recordSkip(it) },
+            onRecordComment = { viewModel.recordComment(it) },
             onDismiss = { showFullscreenPlayer = false }
         )
     }

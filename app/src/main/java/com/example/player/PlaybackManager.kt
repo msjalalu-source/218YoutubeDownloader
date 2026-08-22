@@ -4,6 +4,7 @@ import android.media.AudioAttributes
 import android.media.MediaPlayer
 import android.os.Build
 import android.util.Log
+import androidx.compose.runtime.Immutable
 import com.example.data.local.MediaEntity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -22,6 +23,7 @@ enum class AudioEqualizerPreset(val title: String, val desc: String) {
     PODCAST("পডকাস্ট ও ওয়াজ", "কথোপকথন ও বাচনভঙ্গি ফোকাসড")
 }
 
+@Immutable
 data class PlaybackState(
     val currentMedia: MediaEntity? = null,
     val isPlaying: Boolean = false,

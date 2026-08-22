@@ -4,12 +4,25 @@ import com.example.data.model.AudioTrackOption
 import com.example.data.model.PlatformType
 import com.example.data.model.VideoDetails
 import com.example.data.model.VideoStreamOption
+import android.util.LruCache
+import androidx.compose.runtime.Immutable
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.net.URLDecoder
 import java.util.regex.Pattern
 
 object MediaExtractorService {
+
+    // Thread-safe in-memory LRU cache (capped at 50 recent extractions to conserve RAM)
+    private val detailsLruCache = LruCache<String, VideoDetails>(50)
+
+    fun clearMemoryCache() {
+        detailsLruCache.evictAll()
+    }
+
+    fun trimMemoryCache() {
+        detailsLruCache.trimToSize(15)
+    }
 
     private val YOUTUBE_ID_REGEX = Pattern.compile(
         "(?:youtu\\.be\\/|youtube\\.com\\/(?:embed\\/|v\\/|watch\\?v=|watch\\?.+&v=|shorts\\/|live\\/))([a-zA-Z0-9_-]{11})",
@@ -21,19 +34,122 @@ object MediaExtractorService {
         Pattern.CASE_INSENSITIVE
     )
 
-    private val ADULT_KEYWORDS = listOf(
-        "porn", "xxx", "adult", "18+", "nsfw", "sex", "nude", "erotic", "xvideos", "xnxx",
-        "redtube", "brazzers", "chaturbate", "onlyfans", "hentai", "strip", "erotica", "boobs",
-        "pussy", "dick", "vagina", "blowjob", "fuck", "anal", "tits", "milf", "camgirl",
-        "bonga", "spankbang", "youporn", "xhamster", "kamuk", "যৌন", "পর্ন", "সেক্স",
-        "১৮+", "খোলামেলা", "অশ্লীল", "নগ্ন", "কামুক", "চটি", "ম্যাগাজিন ১৮"
+    private val ADULT_DOMAINS = listOf(
+        "pornhub", "xvideos", "xnxx", "redtube", "brazzers", "chaturbate", "onlyfans",
+        "hentai", "spankbang", "youporn", "xhamster", "eporner", "tube8", "beeg",
+        "hqporner", "motherless", "tnaflix", "heavy-r", "txxx", "thumbzilla",
+        "porntrex", "daftsex", "camwhores", "fapello", "leakgirls", "coomer", "kemono",
+        "bongacams", "stripchat", "camsoda", "livejasmin", "myfreecams", "manyvids",
+        "fansly", "xmovies", "porndoe", "nuvid", "vporn", "youjizz", "pornmd"
     )
 
+    private val ADULT_EXPLICIT_KEYWORDS = listOf(
+        // English & International
+        "porn", "porno", "pornography", "xxx", "nsfw", "sex", "sexy", "nude", "nudity", "erotic",
+        "erotica", "boobs", "boob", "pussy", "dick", "cock", "vagina", "blowjob", "fuck",
+        "anal", "tits", "milf", "camgirl", "stripper", "striptease", "gangbang", "threesome",
+        "creampie", "bukkake", "dildo", "masturbat", "orgasm", "penetration", "deepthroat",
+        "fetish", "shemale", "transsexual", "escort", "incest", "hardcore", "softcore",
+        "webcam", "topless", "naked", "peeping", "voyeur", "voyeurism", "cumshot",
+        "squirt", "leaked sex", "sex tape", "tape leak", "hot sex", "sexy video",
+
+        // Bengali Script (বাংলা হরফ)
+        "যৌন", "পর্ন", "পর্ণ", "সেক্স", "১৮+", "১৮ প্লাস", "খোলামেলা", "নগ্ন", "কামুক",
+        "চটি", "চটি গল্প", "চটিগল্প", "ম্যাগাজিন ১৮", "মিলন", "যৌনাঙ্গ", "স্তন", "সঙ্গম",
+        "দেহব্যবসা", "খদ্দের", "বেশ্যা", "পতিতা", "নোংরা ভিডিও", "গরম ভিডিও", "গোপন ভিডিও",
+        "গোপন মিলন", "যৌন মিলন", "যৌন আবেদন", "যৌন তৃপ্তি", "কামনা", "পাপ কাজ", "উন্মুক্ত স্তন",
+        "কামশক্তি", "চোদাচুদি", "চোদাচুদি", "মাগী", "রাঁড়ি", "খানকি", "লম্পট", "যৌন সঙ্গিনী",
+
+        // Banglish / Romanized Bengali & Regional Slangs
+        "choti", "chotigolpo", "choti golpo", "kharap video", "gopon video", "gorom video",
+        "misti boudi", "boudi romance", "deshi mms", "viral mms", "bangla sex", "bangla choti",
+        "nasta meye", "kharap meye", "bedi", "beda", "magi", "randi", "khanki", "chuda",
+        "chudi", "chodachudi", "chodachodi", "chodna", "chodani", "jouno", "jouno milon",
+        "jouno milan", "nongra", "hot boudi", "boudir sath e", "boudi leak", "deshi leak",
+        "deshi nudes", "deshi scandal", "bd sex", "bangla porn", "hot bhabhi", "devar bhabhi",
+        "savita bhabhi", "mallu sex", "desi porn", "desi sex", "desi scandal", "desi mms",
+        "18plus", "18 plus", "18+ video", "only fans bd", "nude leak", "viral scandal"
+    )
+
+    /**
+     * Normalizes text by removing obfuscations, special characters, leetspeak,
+     * duplicate characters (e.g. "s.e.x", "p*rn", "p0rn", "s3xy", "x-x-x", "seeeexx")
+     */
+    fun normalizeObfuscatedText(input: String): String {
+        var text = input.lowercase()
+
+        // Replace common leetspeak substitutions
+        text = text
+            .replace("0", "o")
+            .replace("1", "i")
+            .replace("3", "e")
+            .replace("4", "a")
+            .replace("@", "a")
+            .replace("5", "s")
+            .replace("$", "s")
+            .replace("7", "t")
+            .replace("8", "b")
+            .replace("9", "g")
+            .replace("!", "i")
+            .replace("|", "l")
+
+        // Remove non-alphanumeric separators (like s.e.x -> sex, p*o*r*n -> porn)
+        val cleanNoSymbols = text.replace(Regex("[^a-z0-9\\u0980-\\u09FF]"), " ")
+        val collapsed = cleanNoSymbols.replace(Regex("\\s+"), " ").trim()
+
+        // Collapse repeated characters (e.g., "seeeexx" -> "sex", "pooorrrnnn" -> "porn")
+        val deduplicated = collapsed.replace(Regex("([a-z])\\1{2,}"), "$1")
+        
+        return "$text $cleanNoSymbols $collapsed $deduplicated"
+    }
+
+    /**
+     * Ultra-Strict Real-Time Multi-Layer Adult & Restricted Content Filter
+     */
     fun isAdultOrRestrictedContent(text: String): Boolean {
-        val lower = text.lowercase().trim()
-        return ADULT_KEYWORDS.any { keyword ->
-            lower.contains(keyword)
+        if (text.isBlank()) return false
+        val rawLower = text.lowercase().trim()
+
+        // 1. Direct Domain / Host check for adult tube networks
+        if (ADULT_DOMAINS.any { domain -> rawLower.contains(domain) }) {
+            return true
         }
+
+        // 2. Normalized Obfuscation and Leetspeak Scan
+        val normalized = normalizeObfuscatedText(rawLower)
+
+        // 3. Keyword and Slang Detection across raw and normalized tokens
+        for (keyword in ADULT_EXPLICIT_KEYWORDS) {
+            val kw = keyword.lowercase()
+            if (rawLower.contains(kw) || normalized.contains(kw)) {
+                return true
+            }
+
+            // Word-boundary check without spaces (e.g., "sexyvideo", "banglasex")
+            val noSpaces = rawLower.replace(Regex("\\s+"), "")
+            if (kw.length >= 4 && noSpaces.contains(kw)) {
+                return true
+            }
+        }
+
+        // 4. Regex Pattern Matching for Obfuscated variants (e.g., p.o.r.n, s-e-x, x*x*x)
+        val obfuscatedPatterns = listOf(
+            Regex("(?i)s[._*~-]*e[._*~-]*x"),
+            Regex("(?i)p[._*~-]*o[._*~-]*r[._*~-]*n"),
+            Regex("(?i)x[._*~-]*x[._*~-]*x"),
+            Regex("(?i)1[._*~-]*8[._*~-]*\\+"),
+            Regex("(?i)b[._*~-]*o[._*~-]*o[._*~-]*b"),
+            Regex("(?i)n[._*~-]*u[._*~-]*d[._*~-]*e"),
+            Regex("(?i)c[._*~-]*h[._*~-]*o[._*~-]*t[._*~-]*i")
+        )
+
+        for (pattern in obfuscatedPatterns) {
+            if (pattern.containsMatchIn(rawLower)) {
+                return true
+            }
+        }
+
+        return false
     }
 
     fun findMediaUrlInText(text: String): String? {
@@ -94,16 +210,31 @@ object MediaExtractorService {
         if (isAdultOrRestrictedContent(cleanUrl)) {
             throw SecurityException("⚠️ ১৮+ বা এডাল্ট কন্টেন্ট রেস্ট্রিক্টেড করা হয়েছে। এই লিংক প্লে বা ডাউনলোড করা যাবে না।")
         }
+
+        // Check in-memory cache first to eliminate redundant network/processing cycles
+        val cached = detailsLruCache.get(cleanUrl)
+        if (cached != null) {
+            return@withContext cached
+        }
+
         val ytId = extractYouTubeId(cleanUrl)
 
-        if (ytId != null) {
+        val result = if (ytId != null) {
             // YouTube Extracted Stream & Bangla-First Tracks
-            return@withContext buildYouTubeDetails(ytId, cleanUrl)
+            buildYouTubeDetails(ytId, cleanUrl)
         } else if (cleanUrl.contains("soundcloud.com", ignoreCase = true)) {
-            return@withContext buildSoundCloudDetails(cleanUrl)
+            buildSoundCloudDetails(cleanUrl)
         } else {
-            return@withContext buildGenericMediaDetails(cleanUrl)
+            buildGenericMediaDetails(cleanUrl)
         }
+
+        detailsLruCache.put(cleanUrl, result)
+        if (ytId != null) {
+            detailsLruCache.put(ytId, result)
+            detailsLruCache.put("https://youtu.be/$ytId", result)
+        }
+
+        return@withContext result
     }
 
     private fun buildYouTubeDetails(videoId: String, originalUrl: String): VideoDetails {
@@ -381,6 +512,7 @@ object MediaExtractorService {
 }
 
 object KnownBanglaMediaCatalogue {
+    @Immutable
     data class KnownMeta(
         val videoId: String,
         val title: String,

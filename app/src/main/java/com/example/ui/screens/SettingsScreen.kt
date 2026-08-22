@@ -33,6 +33,8 @@ fun SettingsScreen(
     uiState: MainUiState,
     onToggleAutoClipboard: (Boolean) -> Unit,
     onToggleBanglaPriority: (Boolean) -> Unit,
+    onToggleStrictSafeMode: (Boolean) -> Unit = {},
+    onOpenAuthDialog: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -44,12 +46,15 @@ fun SettingsScreen(
         verticalArrangement = Arrangement.spacedBy(14.dp),
         contentPadding = PaddingValues(bottom = 90.dp, top = 8.dp)
     ) {
-        // YouTube "You" / Profile Header
+        // YouTube "You" / Profile Header with Google Account status & Tap-to-Manage
         item {
             Surface(
                 shape = RoundedCornerShape(16.dp),
                 color = MaterialTheme.colorScheme.surfaceVariant,
-                modifier = Modifier.fillMaxWidth()
+                onClick = onOpenAuthDialog,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("profile_account_card")
             ) {
                 Row(
                     modifier = Modifier.padding(16.dp),
@@ -67,28 +72,28 @@ fun SettingsScreen(
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = "BD",
+                            text = uiState.userProfile.displayName.firstOrNull()?.uppercase() ?: "G",
                             color = Color.White,
                             fontWeight = FontWeight.Bold,
                             fontSize = 20.sp
                         )
                     }
                     Spacer(modifier = Modifier.width(14.dp))
-                    Column {
+                    Column(modifier = Modifier.weight(1f)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
-                                text = "BDTube User",
+                                text = uiState.userProfile.displayName,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 16.sp,
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Spacer(modifier = Modifier.width(6.dp))
                             Surface(
-                                color = YouTubeRed,
+                                color = if (uiState.userProfile.isLoggedIn) Color(0xFF4CAF50) else YouTubeRed,
                                 shape = RoundedCornerShape(4.dp)
                             ) {
                                 Text(
-                                    text = "PREMIUM",
+                                    text = if (uiState.userProfile.isLoggedIn) "GMAIL SYNC" else "GUEST",
                                     color = Color.White,
                                     fontSize = 9.sp,
                                     fontWeight = FontWeight.Black,
@@ -97,11 +102,17 @@ fun SettingsScreen(
                             }
                         }
                         Text(
-                            text = "@bdtubepro • বিজ্ঞাপনহীন দ্রুত সরাসরি স্ট্রিমার",
+                            text = if (uiState.userProfile.isLoggedIn) uiState.userProfile.email else "Google অ্যাকাউন্ট দিয়ে লগইন করতে ট্যাপ করুন",
                             fontSize = 12.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
+
+                    Icon(
+                        imageVector = Icons.Default.ChevronRight,
+                        contentDescription = "Manage Account",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
         }
@@ -171,61 +182,117 @@ fun SettingsScreen(
             }
         }
 
-        // Restricted Mode / Adult Content Restriction Card
+        // Restricted Mode / Adult Content Restriction Card (AI Ultra-Safe Protection)
         item {
             Surface(
-                shape = RoundedCornerShape(14.dp),
+                shape = RoundedCornerShape(16.dp),
                 color = MaterialTheme.colorScheme.surfaceVariant,
-                border = BorderStroke(1.dp, Color(0xFF4CAF50).copy(alpha = 0.3f)),
+                border = BorderStroke(1.dp, Color(0xFF4CAF50).copy(alpha = 0.4f)),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(14.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
+                Column(modifier = Modifier.padding(14.dp)) {
                     Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .size(36.dp)
-                                .background(Color(0xFF4CAF50).copy(alpha = 0.15f), CircleShape),
-                            contentAlignment = Alignment.Center
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f)
                         ) {
-                            Icon(Icons.Default.Shield, contentDescription = null, tint = Color(0xFF4CAF50), modifier = Modifier.size(20.dp))
-                        }
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Column {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    text = "এডাল্ট কন্টেন্ট রেস্ট্রিকশন (১৮+)",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = MaterialTheme.colorScheme.onSurface
+                            Box(
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .background(Color(0xFF4CAF50).copy(alpha = 0.15f), CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    Icons.Default.Security,
+                                    contentDescription = null,
+                                    tint = Color(0xFF4CAF50),
+                                    modifier = Modifier.size(22.dp)
                                 )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Surface(
-                                    color = Color(0xFF4CAF50),
-                                    shape = RoundedCornerShape(4.dp)
-                                ) {
-                                    Text(
-                                        text = "সক্রিয়",
-                                        color = Color.White,
-                                        fontSize = 9.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
-                                    )
-                                }
                             }
-                            Text(
-                                text = "১৮+ ও প্রাপ্তবয়স্ক কন্টেন্ট স্বয়ংক্রিয়ভাবে ব্লক ও ফিল্টার করা হচ্ছে (Safe Mode)",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        text = "এআই ফ্যামিলি ও ১৮+ সেফটি শিল্ড",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Surface(
+                                        color = if (uiState.isStrictSafeModeEnabled) Color(0xFF4CAF50) else Color(0xFFFF9800),
+                                        shape = RoundedCornerShape(4.dp)
+                                    ) {
+                                        Text(
+                                            text = if (uiState.isStrictSafeModeEnabled) "ULTRA 100%" else "STANDARD",
+                                            color = Color.White,
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Black,
+                                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                }
+                                Text(
+                                    text = "১৮+, নগ্নতা, অশ্লীল বাংলিশ স্ল্যাং ও স্পেলিং-বাইপাস স্বয়ংক্রিয়ভাবে প্রতিহত হয়",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                        Switch(
+                            checked = uiState.isStrictSafeModeEnabled,
+                            onCheckedChange = onToggleStrictSafeMode,
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.White,
+                                checkedTrackColor = Color(0xFF4CAF50)
+                            ),
+                            modifier = Modifier.testTag("toggle_strict_safe_mode")
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f))
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // Real-Time Active Protection Badges
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = Color(0xFF4CAF50).copy(alpha = 0.1f),
+                            border = BorderStroke(0.5.dp, Color(0xFF4CAF50).copy(alpha = 0.3f)),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(vertical = 6.dp, horizontal = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color(0xFF4CAF50), modifier = Modifier.size(14.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("ডিপ বাইপাস শিল্ড", fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
+                            }
+                        }
+
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = Color(0xFF4CAF50).copy(alpha = 0.1f),
+                            border = BorderStroke(0.5.dp, Color(0xFF4CAF50).copy(alpha = 0.3f)),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(vertical = 6.dp, horizontal = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color(0xFF4CAF50), modifier = Modifier.size(14.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("বাংলা ও স্ল্যাং ব্লকার", fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
+                            }
                         }
                     }
                 }

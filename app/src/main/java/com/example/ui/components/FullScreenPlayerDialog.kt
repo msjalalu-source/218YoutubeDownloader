@@ -6,23 +6,18 @@ import android.media.MediaPlayer
 import android.net.Uri
 import android.view.Surface
 import android.view.TextureView
-import android.webkit.WebChromeClient
-import android.webkit.WebSettings
-import android.webkit.WebView
-import android.webkit.WebViewClient
-import android.widget.FrameLayout
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.*
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -49,9 +44,12 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
 import com.example.data.local.MediaEntity
+import com.example.data.service.KnownBanglaMediaCatalogue
 import com.example.data.service.MediaExtractorService
 import com.example.player.AudioEqualizerPreset
 import com.example.player.PlaybackState
+import com.example.recommendation.MLRecommendationEngine
+import com.example.recommendation.ScoredMedia
 import com.example.ui.theme.YouTubeRed
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -75,6 +73,11 @@ fun FullScreenPlayerDialog(
     onSleepTimerChange: (Int) -> Unit,
     onToggleLoop: () -> Unit,
     onToggleShuffle: () -> Unit,
+    onPlayMediaItem: ((videoId: String, title: String) -> Unit)? = null,
+    onToggleSubscribe: ((channelName: String) -> Unit)? = null,
+    onToggleLike: ((videoId: String) -> Unit)? = null,
+    onRecordSkip: ((videoId: String) -> Unit)? = null,
+    onRecordComment: ((videoId: String) -> Unit)? = null,
     onDismiss: () -> Unit
 ) {
     val media = playbackState.currentMedia ?: return
@@ -82,11 +85,51 @@ fun FullScreenPlayerDialog(
     var showSpeedSelector by remember { mutableStateOf(false) }
     var showPresetSelector by remember { mutableStateOf(false) }
     var showTimerSelector by remember { mutableStateOf(false) }
+    var showCommentSheet by remember { mutableStateOf(false) }
     var isVideoBuffering by remember { mutableStateOf(true) }
+
+    val rawVideoId = media.id.removePrefix("stream_")
+    val interactionProfile by MLRecommendationEngine.interactionProfile.collectAsState()
+    val channels by MLRecommendationEngine.channels.collectAsState()
+
+    val isSubscribed = remember(channels, media.author) {
+        channels.find { it.name.equals(media.author, ignoreCase = true) }?.isSubscribed ?: false
+    }
+    val isLiked = remember(interactionProfile, rawVideoId) {
+        interactionProfile.likedVideoIds.contains(rawVideoId)
+    }
+
+    // Dynamic suggested videos calculated by ML engine
+    val suggestedVideos: List<ScoredMedia> = remember(rawVideoId, interactionProfile, media.author) {
+        val foundMeta = KnownBanglaMediaCatalogue.sampleTrending.find { it.videoId == rawVideoId }
+        val category = foundMeta?.category ?: "bangla_hits"
+        MLRecommendationEngine.getSuggestedVideosForPlayer(
+            currentVideoId = rawVideoId,
+            currentCategory = category,
+            currentAuthor = media.author
+        )
+    }
 
     // Double tap feedback state
     var doubleTapSide by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
+
+    // Periodically record watch time in ML Engine
+    LaunchedEffect(playbackState.isPlaying, playbackState.currentPositionMs) {
+        if (playbackState.isPlaying && playbackState.currentPositionMs > 1000L) {
+            val watchedSec = playbackState.currentPositionMs / 1000L
+            val totalSec = (playbackState.durationMs / 1000L).coerceAtLeast(1L)
+            val foundMeta = KnownBanglaMediaCatalogue.sampleTrending.find { it.videoId == rawVideoId }
+            val cat = foundMeta?.category ?: "bangla_hits"
+            MLRecommendationEngine.recordWatchProgress(
+                videoId = rawVideoId,
+                category = cat,
+                author = media.author,
+                durationSeconds = watchedSec,
+                totalDurationSeconds = totalSec
+            )
+        }
+    }
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -98,7 +141,7 @@ fun FullScreenPlayerDialog(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 10.dp),
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -106,7 +149,7 @@ fun FullScreenPlayerDialog(
                         Icon(
                             imageVector = Icons.Default.KeyboardArrowDown,
                             contentDescription = "Minimize",
-                            modifier = Modifier.size(32.dp),
+                            modifier = Modifier.size(30.dp),
                             tint = MaterialTheme.colorScheme.onSurface
                         )
                     }
@@ -135,363 +178,643 @@ fun FullScreenPlayerDialog(
                 }
             }
         ) { paddingValues ->
-            Column(
+            LazyColumn(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(paddingValues)
-                    .padding(horizontal = 16.dp, vertical = 4.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.SpaceBetween
+                    .padding(horizontal = 14.dp),
+                contentPadding = PaddingValues(bottom = 32.dp)
             ) {
-                // Media Canvas / Video Player Screen with Double-Tap Gesture to Seek
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1.1f)
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(Color.Black),
-                    contentAlignment = Alignment.Center
-                ) {
-                    if (media.mediaType == "VIDEO") {
-                        // Real Video Player View
-                        VideoPlayerView(
-                            media = media,
-                            isPlaying = playbackState.isPlaying,
-                            isLooping = playbackState.isLooping,
-                            onBufferingChanged = { isVideoBuffering = it },
-                            onCompletion = {
-                                if (playbackState.isLooping) {
-                                    onSeekTo(0L)
-                                } else {
-                                    onNext()
-                                }
-                            },
-                            modifier = Modifier.fillMaxSize()
-                        )
+                // 1. Media Canvas / Video Player Screen with Double-Tap Gesture to Seek
+                item {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(230.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(Color.Black),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (media.mediaType == "VIDEO") {
+                            // Real Video Player View
+                            VideoPlayerView(
+                                media = media,
+                                isPlaying = playbackState.isPlaying,
+                                isLooping = playbackState.isLooping,
+                                onBufferingChanged = { isVideoBuffering = it },
+                                onCompletion = {
+                                    if (playbackState.isLooping) {
+                                        onSeekTo(0L)
+                                    } else {
+                                        onNext()
+                                    }
+                                },
+                                modifier = Modifier.fillMaxSize()
+                            )
 
-                        if (isVideoBuffering) {
+                            if (isVideoBuffering) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .background(Color.Black.copy(alpha = 0.5f)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        CircularProgressIndicator(
+                                            color = YouTubeRed,
+                                            modifier = Modifier.size(40.dp)
+                                        )
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        Text(
+                                            text = "ভিডিও লোড হচ্ছে...",
+                                            color = Color.White,
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                    }
+                                }
+                            }
+                        } else {
+                            // Audio Artwork & Animated Visualizer
+                            AsyncImage(
+                                model = media.thumbnailUrl,
+                                contentDescription = "Audio Cover",
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize()
+                            )
+
                             Box(
                                 modifier = Modifier
                                     .fillMaxSize()
-                                    .background(Color.Black.copy(alpha = 0.5f)),
-                                contentAlignment = Alignment.Center
+                                    .background(
+                                        Brush.verticalGradient(
+                                            listOf(Color.Transparent, Color.Black.copy(alpha = 0.75f))
+                                        )
+                                    ),
+                                contentAlignment = Alignment.BottomCenter
                             ) {
-                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    CircularProgressIndicator(
-                                        color = YouTubeRed,
-                                        modifier = Modifier.size(44.dp)
-                                    )
-                                    Spacer(modifier = Modifier.height(8.dp))
+                                if (playbackState.isPlaying) {
+                                    AnimatedAudioWave(modifier = Modifier.padding(bottom = 20.dp))
+                                } else {
                                     Text(
-                                        text = "ভিডিও লোড হচ্ছে...",
-                                        color = Color.White,
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Medium
+                                        text = "অডিও প্লে হচ্ছে (${playbackState.audioPreset.title})",
+                                        color = Color.White.copy(alpha = 0.8f),
+                                        fontSize = 13.sp,
+                                        modifier = Modifier.padding(bottom = 20.dp)
                                     )
                                 }
                             }
                         }
-                    } else {
-                        // Audio Artwork & Animated Visualizer
-                        AsyncImage(
-                            model = media.thumbnailUrl,
-                            contentDescription = "Audio Cover",
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier.fillMaxSize()
-                        )
 
+                        // Gesture Layer: Double tap left (-10s), Double tap right (+10s), Single tap (Play/Pause)
                         Box(
                             modifier = Modifier
                                 .fillMaxSize()
-                                .background(
-                                    Brush.verticalGradient(
-                                        listOf(Color.Transparent, Color.Black.copy(alpha = 0.75f))
+                                .pointerInput(Unit) {
+                                    detectTapGestures(
+                                        onDoubleTap = { offset ->
+                                            if (offset.x < size.width / 2) {
+                                                onSkipBackward()
+                                                doubleTapSide = "left"
+                                            } else {
+                                                onSkipForward()
+                                                doubleTapSide = "right"
+                                            }
+                                            scope.launch {
+                                                delay(750)
+                                                doubleTapSide = null
+                                            }
+                                        },
+                                        onTap = {
+                                            onTogglePlayPause()
+                                        }
                                     )
-                                ),
-                            contentAlignment = Alignment.BottomCenter
-                        ) {
-                            if (playbackState.isPlaying) {
-                                AnimatedAudioWave(modifier = Modifier.padding(bottom = 20.dp))
-                            } else {
-                                Text(
-                                    text = "অডিও প্লে হচ্ছে (${playbackState.audioPreset.title})",
-                                    color = Color.White.copy(alpha = 0.8f),
-                                    fontSize = 13.sp,
-                                    modifier = Modifier.padding(bottom = 20.dp)
-                                )
+                                }
+                        )
+
+                        // Visual Feedback for Double-Tap Rewind/Forward
+                        if (doubleTapSide != null) {
+                            Surface(
+                                shape = CircleShape,
+                                color = Color.Black.copy(alpha = 0.75f),
+                                modifier = Modifier
+                                    .align(if (doubleTapSide == "left") Alignment.CenterStart else Alignment.CenterEnd)
+                                    .padding(24.dp)
+                                    .size(64.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Icon(
+                                            imageVector = if (doubleTapSide == "left") Icons.Default.Replay10 else Icons.Default.Forward10,
+                                            contentDescription = null,
+                                            tint = Color.White,
+                                            modifier = Modifier.size(28.dp)
+                                        )
+                                        Text(
+                                            text = if (doubleTapSide == "left") "-10s" else "+10s",
+                                            color = Color.White,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
+                }
 
-                    // Gesture Layer: Double tap left (-10s), Double tap right (+10s), Single tap (Play/Pause)
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .pointerInput(Unit) {
-                                detectTapGestures(
-                                    onDoubleTap = { offset ->
-                                        if (offset.x < size.width / 2) {
-                                            onSkipBackward()
-                                            doubleTapSide = "left"
-                                        } else {
-                                            onSkipForward()
-                                            doubleTapSide = "right"
-                                        }
-                                        scope.launch {
-                                            delay(750)
-                                            doubleTapSide = null
-                                        }
-                                    },
-                                    onTap = {
-                                        onTogglePlayPause()
-                                    }
-                                )
-                            }
-                    )
+                // 2. Video Title & Channel / Subscriptions Bar
+                item {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        Text(
+                            text = media.title,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
 
-                    // Visual Feedback for Double-Tap Rewind/Forward
-                    if (doubleTapSide != null) {
+                        // Creator Channel Bar with Subscribe Button
                         Surface(
-                            shape = CircleShape,
-                            color = Color.Black.copy(alpha = 0.75f),
-                            modifier = Modifier
-                                .align(if (doubleTapSide == "left") Alignment.CenterStart else Alignment.CenterEnd)
-                                .padding(24.dp)
-                                .size(68.dp)
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                            modifier = Modifier.fillMaxWidth()
                         ) {
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.Center
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(38.dp)
+                                            .clip(CircleShape)
+                                            .background(YouTubeRed.copy(alpha = 0.15f)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = media.author.firstOrNull()?.toString() ?: "C",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 16.sp,
+                                            color = YouTubeRed
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Column {
+                                        Text(
+                                            text = media.author,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                        Text(
+                                            text = "১.৫M সাবস্ক্রাইবার",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+
+                                // YouTube-style Subscribe / Subscribed Button
+                                Button(
+                                    onClick = {
+                                        onToggleSubscribe?.invoke(media.author)
+                                            ?: MLRecommendationEngine.toggleSubscription(media.author)
+                                    },
+                                    shape = RoundedCornerShape(20.dp),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = if (isSubscribed) MaterialTheme.colorScheme.surfaceVariant else Color.White,
+                                        contentColor = if (isSubscribed) MaterialTheme.colorScheme.onSurfaceVariant else Color.Black
+                                    ),
+                                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
+                                    elevation = ButtonDefaults.buttonElevation(defaultElevation = 0.dp)
+                                ) {
+                                    if (isSubscribed) {
+                                        Icon(
+                                            imageVector = Icons.Default.NotificationsActive,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(14.dp),
+                                            tint = YouTubeRed
+                                        )
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("সাবস্ক্রাইবড", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                    } else {
+                                        Text("সাবস্ক্রাইব", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // 3. YouTube Action Row: Like, Dislike/Skip, Comments, Audio Track
+                item {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // Like Button (Active state trains ML)
+                        Surface(
+                            shape = RoundedCornerShape(20.dp),
+                            color = if (isLiked) YouTubeRed.copy(alpha = 0.15f) else MaterialTheme.colorScheme.surfaceVariant,
+                            border = if (isLiked) BorderStroke(1.dp, YouTubeRed.copy(alpha = 0.5f)) else null,
+                            modifier = Modifier.clickable {
+                                onToggleLike?.invoke(rawVideoId) ?: MLRecommendationEngine.toggleLike(rawVideoId)
+                            }
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Icon(
-                                    imageVector = if (doubleTapSide == "left") Icons.Default.FastRewind else Icons.Default.FastForward,
-                                    contentDescription = null,
-                                    tint = Color.White,
-                                    modifier = Modifier.size(28.dp)
+                                    imageVector = if (isLiked) Icons.Default.ThumbUp else Icons.Outlined.ThumbUp,
+                                    contentDescription = "Like",
+                                    tint = if (isLiked) YouTubeRed else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(16.dp)
                                 )
+                                Spacer(modifier = Modifier.width(6.dp))
                                 Text(
-                                    text = if (doubleTapSide == "left") "-১০ সে" else "+১০ সে",
-                                    color = Color.White,
+                                    text = if (isLiked) "লাইকড (AI)" else "লাইক",
+                                    fontSize = 12.sp,
+                                    fontWeight = if (isLiked) FontWeight.Bold else FontWeight.Normal,
+                                    color = if (isLiked) YouTubeRed else MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                        }
+
+                        // Dislike / Skip Button (Negative signal in ML)
+                        Surface(
+                            shape = RoundedCornerShape(20.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant,
+                            modifier = Modifier.clickable {
+                                onRecordSkip?.invoke(rawVideoId) ?: MLRecommendationEngine.recordSkipOrDislike(rawVideoId)
+                            }
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.ThumbDown,
+                                    contentDescription = "Dislike / Skip",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("স্কিপ", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface)
+                            }
+                        }
+
+                        // Comment Button (Opens Comment Sheet)
+                        Surface(
+                            shape = RoundedCornerShape(20.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant,
+                            modifier = Modifier.clickable { showCommentSheet = true }
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Comment,
+                                    contentDescription = "Comments",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("মন্তব্য", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface)
+                            }
+                        }
+
+                        // Audio Track Language Pill
+                        Surface(
+                            shape = RoundedCornerShape(20.dp),
+                            color = YouTubeRed.copy(alpha = 0.12f),
+                            border = BorderStroke(1.dp, YouTubeRed.copy(alpha = 0.3f)),
+                            modifier = Modifier.clickable { showTrackSelector = true }
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.VolumeUp,
+                                    contentDescription = null,
+                                    tint = YouTubeRed,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = playbackState.selectedAudioTrackName.take(8) + "..",
                                     fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold
+                                    fontWeight = FontWeight.Bold,
+                                    color = YouTubeRed
                                 )
                             }
                         }
                     }
                 }
 
-                Spacer(modifier = Modifier.height(10.dp))
+                // 4. Seek Bar & Timers
+                item {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        val currentPos = playbackState.currentPositionMs
+                        val totalDuration = playbackState.durationMs.coerceAtLeast(1000L)
+                        val sliderValue = (currentPos.toFloat() / totalDuration.toFloat()).coerceIn(0f, 1f)
 
-                // Media Metadata & Track Language Pill
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(
-                        text = media.title,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        textAlign = TextAlign.Center,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Text(
-                        text = media.author,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
+                        Slider(
+                            value = sliderValue,
+                            onValueChange = { frac ->
+                                onSeekTo((frac * totalDuration).toLong())
+                            },
+                            colors = SliderDefaults.colors(
+                                thumbColor = YouTubeRed,
+                                activeTrackColor = YouTubeRed,
+                                inactiveTrackColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
+                            ),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("player_seek_slider")
+                        )
 
-                    // Audio Track Tag
-                    Surface(
-                        color = YouTubeRed.copy(alpha = 0.15f),
-                        shape = RoundedCornerShape(20.dp),
-                        border = BorderStroke(1.dp, YouTubeRed.copy(alpha = 0.4f)),
-                        modifier = Modifier.clickable { showTrackSelector = true }
-                    ) {
                         Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp)
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 4.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = MediaExtractorService.formatSeconds(currentPos / 1000L),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = MediaExtractorService.formatSeconds(totalDuration / 1000L),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+
+                // 5. Primary Playback Controls
+                item {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceEvenly,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        IconButton(onClick = onToggleShuffle) {
+                            Icon(
+                                imageVector = Icons.Default.Shuffle,
+                                contentDescription = "Shuffle",
+                                tint = if (playbackState.isShuffle) YouTubeRed else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+
+                        IconButton(onClick = onPrevious) {
+                            Icon(
+                                imageVector = Icons.Default.SkipPrevious,
+                                contentDescription = "Previous",
+                                modifier = Modifier.size(30.dp),
+                                tint = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+
+                        IconButton(onClick = onSkipBackward) {
+                            Icon(
+                                imageVector = Icons.Default.Replay10,
+                                contentDescription = "Replay 10s",
+                                modifier = Modifier.size(26.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+
+                        // Main Play/Pause Button
+                        FilledIconButton(
+                            onClick = onTogglePlayPause,
+                            colors = IconButtonDefaults.filledIconButtonColors(containerColor = YouTubeRed),
+                            modifier = Modifier
+                                .size(58.dp)
+                                .testTag("fullscreen_play_pause")
                         ) {
                             Icon(
-                                imageVector = Icons.Default.VolumeUp,
+                                imageVector = if (playbackState.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                contentDescription = "Play/Pause",
+                                tint = Color.White,
+                                modifier = Modifier.size(32.dp)
+                            )
+                        }
+
+                        IconButton(onClick = onSkipForward) {
+                            Icon(
+                                imageVector = Icons.Default.Forward10,
+                                contentDescription = "Forward 10s",
+                                modifier = Modifier.size(26.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+
+                        IconButton(onClick = onNext) {
+                            Icon(
+                                imageVector = Icons.Default.SkipNext,
+                                contentDescription = "Next",
+                                modifier = Modifier.size(30.dp),
+                                tint = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+
+                        IconButton(onClick = onToggleLoop) {
+                            Icon(
+                                imageVector = Icons.Default.Repeat,
+                                contentDescription = "Loop",
+                                tint = if (playbackState.isLooping) YouTubeRed else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+
+                // 6. Equalizer, Speed, and Sleep Filter Chips
+                item {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        FilterChip(
+                            selected = playbackState.playbackSpeed != 1.0f,
+                            onClick = { showSpeedSelector = true },
+                            label = { Text("${playbackState.playbackSpeed}x", fontSize = 11.sp) },
+                            leadingIcon = { Icon(Icons.Default.Speed, contentDescription = null, modifier = Modifier.size(13.dp)) }
+                        )
+
+                        FilterChip(
+                            selected = playbackState.audioPreset != AudioEqualizerPreset.NORMAL,
+                            onClick = { showPresetSelector = true },
+                            label = { Text(playbackState.audioPreset.title.take(10), fontSize = 11.sp) },
+                            leadingIcon = { Icon(Icons.Default.Equalizer, contentDescription = null, modifier = Modifier.size(13.dp)) }
+                        )
+
+                        FilterChip(
+                            selected = playbackState.sleepTimerMinutesLeft > 0,
+                            onClick = { showTimerSelector = true },
+                            label = {
+                                Text(
+                                    text = if (playbackState.sleepTimerMinutesLeft > 0) "${playbackState.sleepTimerMinutesLeft} মি" else "স্লিপ",
+                                    fontSize = 11.sp
+                                )
+                            },
+                            leadingIcon = { Icon(Icons.Default.Timer, contentDescription = null, modifier = Modifier.size(13.dp)) }
+                        )
+                    }
+                }
+
+                // 7. ML-Based "Suggested Videos" (অ্যালগরিদম মেশিন লার্নিং রিকমেন্ডেশন)
+                item {
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.AutoAwesome,
                                 contentDescription = null,
                                 tint = YouTubeRed,
-                                modifier = Modifier.size(14.dp)
+                                modifier = Modifier.size(18.dp)
                             )
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = "অডিও: ${playbackState.selectedAudioTrackName}",
-                                style = MaterialTheme.typography.labelSmall,
+                                text = "সাজেস্টেড ভিডিও (ML অ্যালগরিদম)",
+                                style = MaterialTheme.typography.titleSmall,
                                 fontWeight = FontWeight.Bold,
-                                color = YouTubeRed
+                                color = MaterialTheme.colorScheme.onSurface
                             )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Icon(
-                                imageVector = Icons.Default.ArrowDropDown,
-                                contentDescription = null,
-                                tint = YouTubeRed,
-                                modifier = Modifier.size(16.dp)
+                        }
+
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = YouTubeRed.copy(alpha = 0.12f)
+                        ) {
+                            Text(
+                                text = "আপনার জন্য বাছাইকৃত",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = YouTubeRed,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
                             )
                         }
                     }
+                    Spacer(modifier = Modifier.height(8.dp))
                 }
 
-                Spacer(modifier = Modifier.height(10.dp))
-
-                // Seek Bar & Timers
-                Column(modifier = Modifier.fillMaxWidth()) {
-                    val currentPos = playbackState.currentPositionMs
-                    val totalDuration = playbackState.durationMs.coerceAtLeast(1000L)
-                    val sliderValue = (currentPos.toFloat() / totalDuration.toFloat()).coerceIn(0f, 1f)
-
-                    Slider(
-                        value = sliderValue,
-                        onValueChange = { frac ->
-                            onSeekTo((frac * totalDuration).toLong())
-                        },
-                        colors = SliderDefaults.colors(
-                            thumbColor = YouTubeRed,
-                            activeTrackColor = YouTubeRed,
-                            inactiveTrackColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
-                        ),
-                        modifier = Modifier.fillMaxWidth().testTag("player_seek_slider")
-                    )
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text(
-                            text = MediaExtractorService.formatSeconds(currentPos / 1000L),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Text(
-                            text = MediaExtractorService.formatSeconds(totalDuration / 1000L),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(6.dp))
-
-                // Primary Playback Controls
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceEvenly,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    IconButton(onClick = onToggleShuffle) {
-                        Icon(
-                            imageVector = Icons.Default.Shuffle,
-                            contentDescription = "Shuffle",
-                            tint = if (playbackState.isShuffle) YouTubeRed else MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-
-                    IconButton(onClick = onPrevious) {
-                        Icon(
-                            imageVector = Icons.Default.SkipPrevious,
-                            contentDescription = "Previous",
-                            modifier = Modifier.size(32.dp),
-                            tint = MaterialTheme.colorScheme.onSurface
-                        )
-                    }
-
-                    IconButton(onClick = onSkipBackward) {
-                        Icon(
-                            imageVector = Icons.Default.Replay10,
-                            contentDescription = "Replay 10s",
-                            modifier = Modifier.size(28.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-
-                    // Main Play/Pause Button
-                    FilledIconButton(
-                        onClick = onTogglePlayPause,
-                        colors = IconButtonDefaults.filledIconButtonColors(containerColor = YouTubeRed),
+                // Suggested Videos List
+                items(suggestedVideos, key = { it.meta.videoId }) { suggestedItem ->
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                        border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.15f)),
                         modifier = Modifier
-                            .size(62.dp)
-                            .testTag("fullscreen_play_pause")
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp)
+                            .clickable {
+                                onPlayMediaItem?.invoke(suggestedItem.meta.videoId, suggestedItem.meta.title)
+                            }
                     ) {
-                        Icon(
-                            imageVector = if (playbackState.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                            contentDescription = "Play/Pause",
-                            tint = Color.White,
-                            modifier = Modifier.size(34.dp)
-                        )
-                    }
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            // Thumbnail
+                            Box(
+                                modifier = Modifier
+                                    .size(width = 110.dp, height = 65.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(Color.Black)
+                            ) {
+                                AsyncImage(
+                                    model = suggestedItem.meta.customThumb ?: "https://img.youtube.com/vi/${suggestedItem.meta.videoId}/hqdefault.jpg",
+                                    contentDescription = null,
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                                Surface(
+                                    shape = RoundedCornerShape(4.dp),
+                                    color = Color.Black.copy(alpha = 0.8f),
+                                    modifier = Modifier
+                                        .align(Alignment.BottomEnd)
+                                        .padding(4.dp)
+                                ) {
+                                    Text(
+                                        text = MediaExtractorService.formatSeconds(suggestedItem.meta.durationSeconds),
+                                        fontSize = 9.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color.White,
+                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                    )
+                                }
+                            }
 
-                    IconButton(onClick = onSkipForward) {
-                        Icon(
-                            imageVector = Icons.Default.Forward10,
-                            contentDescription = "Forward 10s",
-                            modifier = Modifier.size(28.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
+                            Spacer(modifier = Modifier.width(10.dp))
 
-                    IconButton(onClick = onNext) {
-                        Icon(
-                            imageVector = Icons.Default.SkipNext,
-                            contentDescription = "Next",
-                            modifier = Modifier.size(32.dp),
-                            tint = MaterialTheme.colorScheme.onSurface
-                        )
-                    }
-
-                    IconButton(onClick = onToggleLoop) {
-                        Icon(
-                            imageVector = Icons.Default.Repeat,
-                            contentDescription = "Loop",
-                            tint = if (playbackState.isLooping) YouTubeRed else MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                            // Details
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = suggestedItem.meta.title,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = "${suggestedItem.meta.author} • ${suggestedItem.meta.views}",
+                                    fontSize = 10.5.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Spacer(modifier = Modifier.height(3.dp))
+                                // ML Reason Badge
+                                Text(
+                                    text = "✨ ${suggestedItem.recommendationReason}",
+                                    fontSize = 9.5.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = YouTubeRed
+                                )
+                            }
+                        }
                     }
                 }
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                // Bottom Controls Row: Speed, Equalizer preset, Sleep Timer
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    FilterChip(
-                        selected = playbackState.playbackSpeed != 1.0f,
-                        onClick = { showSpeedSelector = true },
-                        label = { Text("${playbackState.playbackSpeed}x", fontSize = 12.sp) },
-                        leadingIcon = { Icon(Icons.Default.Speed, contentDescription = null, modifier = Modifier.size(14.dp)) }
-                    )
-
-                    FilterChip(
-                        selected = playbackState.audioPreset != AudioEqualizerPreset.NORMAL,
-                        onClick = { showPresetSelector = true },
-                        label = { Text(playbackState.audioPreset.title.take(10), fontSize = 12.sp) },
-                        leadingIcon = { Icon(Icons.Default.Equalizer, contentDescription = null, modifier = Modifier.size(14.dp)) }
-                    )
-
-                    FilterChip(
-                        selected = playbackState.sleepTimerMinutesLeft > 0,
-                        onClick = { showTimerSelector = true },
-                        label = {
-                            Text(
-                                text = if (playbackState.sleepTimerMinutesLeft > 0) "${playbackState.sleepTimerMinutesLeft} মি" else "স্লিপ",
-                                fontSize = 12.sp
-                            )
-                        },
-                        leadingIcon = { Icon(Icons.Default.Timer, contentDescription = null, modifier = Modifier.size(14.dp)) }
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(4.dp))
             }
         }
+    }
+
+    // Interactive Comment Sheet
+    if (showCommentSheet) {
+        YouTubeCommentSheet(
+            videoTitle = media.title,
+            onDismiss = { showCommentSheet = false },
+            onCommentSubmitted = { text ->
+                onRecordComment?.invoke(rawVideoId) ?: MLRecommendationEngine.recordComment(rawVideoId)
+            }
+        )
     }
 
     // Audio Track Selector Dialog
@@ -516,88 +839,29 @@ fun FullScreenPlayerDialog(
                             },
                             shape = RoundedCornerShape(8.dp),
                             color = if (isSelected) YouTubeRed.copy(alpha = 0.15f) else Color.Transparent,
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp)
                         ) {
                             Row(
-                                modifier = Modifier.padding(12.dp),
-                                verticalAlignment = Alignment.CenterVertically
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
                             ) {
-                                RadioButton(
-                                    selected = isSelected,
-                                    onClick = {
-                                        onAudioTrackChange(track)
-                                        showTrackSelector = false
-                                    },
-                                    colors = RadioButtonDefaults.colors(selectedColor = YouTubeRed)
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
                                 Text(
                                     text = track,
+                                    fontSize = 13.sp,
                                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
                                     color = if (isSelected) YouTubeRed else MaterialTheme.colorScheme.onSurface
                                 )
-                            }
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { showTrackSelector = false }) {
-                    Text("ঠিক আছে", color = YouTubeRed)
-                }
-            }
-        )
-    }
-
-    // Audio Preset / Equalizer Dialog
-    if (showPresetSelector) {
-        AlertDialog(
-            onDismissRequest = { showPresetSelector = false },
-            title = {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.GraphicEq, contentDescription = null, tint = YouTubeRed)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("অডিও সাউন্ড ও ইকুয়ালাইজার", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                }
-            },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    AudioEqualizerPreset.values().forEach { preset ->
-                        val isSelected = playbackState.audioPreset == preset
-                        Surface(
-                            onClick = {
-                                onAudioPresetChange(preset)
-                                showPresetSelector = false
-                            },
-                            shape = RoundedCornerShape(10.dp),
-                            color = if (isSelected) YouTubeRed.copy(alpha = 0.15f) else MaterialTheme.colorScheme.surfaceVariant,
-                            border = if (isSelected) BorderStroke(1.dp, YouTubeRed) else null,
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(12.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                RadioButton(
-                                    selected = isSelected,
-                                    onClick = {
-                                        onAudioPresetChange(preset)
-                                        showPresetSelector = false
-                                    },
-                                    colors = RadioButtonDefaults.colors(selectedColor = YouTubeRed)
-                                )
-                                Spacer(modifier = Modifier.width(10.dp))
-                                Column {
-                                    Text(
-                                        text = preset.title,
-                                        fontWeight = FontWeight.Bold,
-                                        color = if (isSelected) YouTubeRed else MaterialTheme.colorScheme.onSurface,
-                                        fontSize = 14.sp
-                                    )
-                                    Text(
-                                        text = preset.desc,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        fontSize = 11.sp
+                                if (isSelected) {
+                                    Icon(
+                                        imageVector = Icons.Default.Check,
+                                        contentDescription = "Selected",
+                                        tint = YouTubeRed,
+                                        modifier = Modifier.size(18.dp)
                                     )
                                 }
                             }
@@ -606,33 +870,127 @@ fun FullScreenPlayerDialog(
                 }
             },
             confirmButton = {
-                TextButton(onClick = { showPresetSelector = false }) {
+                TextButton(onClick = { showTrackSelector = false }) {
                     Text("বন্ধ করুন", color = YouTubeRed)
                 }
             }
         )
     }
 
-    // Sleep Timer Dialog
-    if (showTimerSelector) {
-        val timerOptions = listOf(
-            0 to "টাইমার বন্ধ (Off)",
-            15 to "১৫ মিনিট পর বন্ধ",
-            30 to "৩০ মিনিট পর বন্ধ",
-            45 to "৪৫ মিনিট পর বন্ধ",
-            60 to "১ ঘন্টা (৬০ মি) পর বন্ধ"
-        )
+    // Speed Selector Dialog
+    if (showSpeedSelector) {
+        val speeds = listOf(0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 1.75f, 2.0f)
         AlertDialog(
-            onDismissRequest = { showTimerSelector = false },
-            title = {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Timer, contentDescription = null, tint = YouTubeRed)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("স্লিপ টাইমার", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+            onDismissRequest = { showSpeedSelector = false },
+            title = { Text("প্লেব্যাক গতি (Playback Speed)") },
+            text = {
+                Column {
+                    speeds.forEach { speed ->
+                        val isSelected = playbackState.playbackSpeed == speed
+                        Surface(
+                            onClick = {
+                                onSpeedChange(speed)
+                                showSpeedSelector = false
+                            },
+                            shape = RoundedCornerShape(8.dp),
+                            color = if (isSelected) YouTubeRed.copy(alpha = 0.15f) else Color.Transparent,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 3.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(10.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = if (speed == 1.0f) "1.0x (স্বাভাবিক)" else "${speed}x",
+                                    fontSize = 13.sp,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                    color = if (isSelected) YouTubeRed else MaterialTheme.colorScheme.onSurface
+                                )
+                                if (isSelected) {
+                                    Icon(Icons.Default.Check, contentDescription = null, tint = YouTubeRed, modifier = Modifier.size(18.dp))
+                                }
+                            }
+                        }
+                    }
                 }
             },
+            confirmButton = {
+                TextButton(onClick = { showSpeedSelector = false }) {
+                    Text("ঠিক আছে", color = YouTubeRed)
+                }
+            }
+        )
+    }
+
+    // Audio Equalizer Preset Selector Dialog
+    if (showPresetSelector) {
+        AlertDialog(
+            onDismissRequest = { showPresetSelector = false },
+            title = { Text("বাংলা অডিও সাউন্ড ইকুইলাইজার") },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Column {
+                    AudioEqualizerPreset.values().forEach { preset ->
+                        val isSelected = playbackState.audioPreset == preset
+                        Surface(
+                            onClick = {
+                                onAudioPresetChange(preset)
+                                showPresetSelector = false
+                            },
+                            shape = RoundedCornerShape(8.dp),
+                            color = if (isSelected) YouTubeRed.copy(alpha = 0.15f) else Color.Transparent,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 3.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(10.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column {
+                                    Text(
+                                        text = preset.title,
+                                        fontSize = 13.sp,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                        color = if (isSelected) YouTubeRed else MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Text(
+                                        text = "বেস ও ভয়েস অপ্টিমাইজড",
+                                        fontSize = 10.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                if (isSelected) {
+                                    Icon(Icons.Default.Check, contentDescription = null, tint = YouTubeRed, modifier = Modifier.size(18.dp))
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showPresetSelector = false }) {
+                    Text("ঠিক আছে", color = YouTubeRed)
+                }
+            }
+        )
+    }
+
+    // Sleep Timer Selector Dialog
+    if (showTimerSelector) {
+        val timerOptions = listOf(0 to "স্লিপ টাইমার বন্ধ", 15 to "১৫ মিনিট", 30 to "৩০ মিনিট", 45 to "৪৫ মিনিট", 60 to "১ ঘন্টা")
+        AlertDialog(
+            onDismissRequest = { showTimerSelector = false },
+            title = { Text("স্লিপ টাইমার সেট করুন") },
+            text = {
+                Column {
                     timerOptions.forEach { (mins, label) ->
                         val isSelected = playbackState.sleepTimerMinutesLeft == mins
                         Surface(
@@ -642,26 +1000,26 @@ fun FullScreenPlayerDialog(
                             },
                             shape = RoundedCornerShape(8.dp),
                             color = if (isSelected) YouTubeRed.copy(alpha = 0.15f) else Color.Transparent,
-                            modifier = Modifier.fillMaxWidth()
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 3.dp)
                         ) {
                             Row(
-                                modifier = Modifier.padding(10.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(10.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                RadioButton(
-                                    selected = isSelected,
-                                    onClick = {
-                                        onSleepTimerChange(mins)
-                                        showTimerSelector = false
-                                    },
-                                    colors = RadioButtonDefaults.colors(selectedColor = YouTubeRed)
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
                                 Text(
                                     text = label,
+                                    fontSize = 13.sp,
                                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
                                     color = if (isSelected) YouTubeRed else MaterialTheme.colorScheme.onSurface
                                 )
+                                if (isSelected) {
+                                    Icon(Icons.Default.Check, contentDescription = null, tint = YouTubeRed, modifier = Modifier.size(18.dp))
+                                }
                             }
                         }
                     }
@@ -669,38 +1027,7 @@ fun FullScreenPlayerDialog(
             },
             confirmButton = {
                 TextButton(onClick = { showTimerSelector = false }) {
-                    Text("বন্ধ করুন", color = YouTubeRed)
-                }
-            }
-        )
-    }
-
-    // Speed Selector Dialog
-    if (showSpeedSelector) {
-        val speeds = listOf(0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f)
-        AlertDialog(
-            onDismissRequest = { showSpeedSelector = false },
-            title = { Text("প্লেব্যাক গতি নির্বাচন") },
-            text = {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceEvenly
-                ) {
-                    speeds.forEach { sp ->
-                        FilterChip(
-                            selected = playbackState.playbackSpeed == sp,
-                            onClick = {
-                                onSpeedChange(sp)
-                                showSpeedSelector = false
-                            },
-                            label = { Text("${sp}x") }
-                        )
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { showSpeedSelector = false }) {
-                    Text("বন্ধ করুন", color = YouTubeRed)
+                    Text("ঠিক আছে", color = YouTubeRed)
                 }
             }
         )
@@ -716,163 +1043,21 @@ fun VideoPlayerView(
     onCompletion: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val ytId = remember(media) { extractYouTubeIdFromMedia(media) }
-
-    if (!ytId.isNullOrBlank()) {
-        YouTubeEmbeddedPlayer(
-            videoId = ytId,
-            onBufferingChanged = onBufferingChanged,
-            modifier = modifier
-        )
-    } else {
-        val videoUri = remember(media) {
-            val local = media.localFilePath
-            if (!local.isNullOrBlank() && File(local).exists() && File(local).length() > 0) {
-                Uri.fromFile(File(local))
-            } else if (media.streamUrl.isNotBlank() && (media.streamUrl.startsWith("http://") || media.streamUrl.startsWith("https://"))) {
-                Uri.parse(media.streamUrl)
-            } else {
-                Uri.parse(FALLBACK_VIDEO_URL)
-            }
-        }
-
-        TextureVideoPlayerView(
-            videoUri = videoUri,
-            isPlaying = isPlaying,
-            isLooping = isLooping,
-            onBufferingChanged = onBufferingChanged,
-            onCompletion = onCompletion,
-            modifier = modifier
-        )
-    }
-}
-
-fun extractYouTubeIdFromMedia(media: MediaEntity): String? {
-    // If local file exists, play offline file instead
-    if (!media.localFilePath.isNullOrBlank() && File(media.localFilePath).exists() && File(media.localFilePath).length() > 0) {
-        return null
-    }
-    val direct = MediaExtractorService.extractYouTubeId(media.originalUrl)
-    if (!direct.isNullOrBlank()) return direct
-
-    val idClean = media.id.removePrefix("stream_")
-    val idExtract = MediaExtractorService.extractYouTubeId(idClean)
-    if (!idExtract.isNullOrBlank()) return idExtract
-
-    if (idClean.length == 11 && idClean.matches(Regex("^[a-zA-Z0-9_-]{11}$"))) {
-        return idClean
-    }
-    if (media.originalUrl.length == 11 && media.originalUrl.matches(Regex("^[a-zA-Z0-9_-]{11}$"))) {
-        return media.originalUrl
-    }
-    val thumbRegex = Regex("/vi/([a-zA-Z0-9_-]+)/")
-    val match = thumbRegex.find(media.thumbnailUrl)
-    if (match != null) {
-        return match.groupValues[1]
-    }
-    return null
-}
-
-@Composable
-fun YouTubeEmbeddedPlayer(
-    videoId: String,
-    onBufferingChanged: (Boolean) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    var webViewRef by remember { mutableStateOf<WebView?>(null) }
-
-    val htmlContent = remember(videoId) {
-        """
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-            <style>
-                * { box-sizing: border-box; margin: 0; padding: 0; }
-                html, body { width: 100%; height: 100%; background: #000; overflow: hidden; display: flex; justify-content: center; align-items: center; }
-                iframe { width: 100%; height: 100%; border: none; }
-            </style>
-        </head>
-        <body>
-            <iframe 
-                src="https://www.youtube-nocookie.com/embed/$videoId?autoplay=1&playsinline=1&controls=1&rel=0&modestbranding=1&enablejsapi=1" 
-                allow="autoplay; encrypted-media; picture-in-picture; accelerometer; gyroscope" 
-                allowfullscreen>
-            </iframe>
-        </body>
-        </html>
-        """.trimIndent()
-    }
-
-    DisposableEffect(videoId) {
-        onDispose {
-            try {
-                webViewRef?.let { wv ->
-                    wv.stopLoading()
-                    wv.loadUrl("about:blank")
-                    wv.destroy()
-                }
-            } catch (e: Exception) {
-                // ignore
-            }
-        }
-    }
-
-    AndroidView(
-        factory = { ctx ->
-            WebView(ctx).apply {
-                layoutParams = FrameLayout.LayoutParams(
-                    FrameLayout.LayoutParams.MATCH_PARENT,
-                    FrameLayout.LayoutParams.MATCH_PARENT
-                )
-                setBackgroundColor(0xFF000000.toInt())
-                settings.apply {
-                    javaScriptEnabled = true
-                    domStorageEnabled = true
-                    mediaPlaybackRequiresUserGesture = false
-                    loadWithOverviewMode = true
-                    useWideViewPort = true
-                    cacheMode = WebSettings.LOAD_DEFAULT
-                    allowContentAccess = true
-                    allowFileAccess = true
-                }
-                webChromeClient = object : WebChromeClient() {
-                    override fun onProgressChanged(view: WebView?, newProgress: Int) {
-                        if (newProgress >= 60) {
-                            onBufferingChanged(false)
-                        }
-                    }
-                }
-                webViewClient = object : WebViewClient() {
-                    override fun onPageFinished(view: WebView?, url: String?) {
-                        onBufferingChanged(false)
-                    }
-                }
-                loadDataWithBaseURL("https://www.youtube.com", htmlContent, "text/html", "UTF-8", null)
-                webViewRef = this
-            }
-        },
-        update = { wv ->
-            webViewRef = wv
-        },
-        modifier = modifier
-    )
-}
-
-@Composable
-fun TextureVideoPlayerView(
-    videoUri: Uri,
-    isPlaying: Boolean,
-    isLooping: Boolean,
-    onBufferingChanged: (Boolean) -> Unit,
-    onCompletion: () -> Unit,
-    modifier: Modifier = Modifier
-) {
     val context = LocalContext.current
     var mediaPlayerRef by remember { mutableStateOf<MediaPlayer?>(null) }
     var surfaceRef by remember { mutableStateOf<Surface?>(null) }
 
-    DisposableEffect(videoUri) {
+    val videoUri = remember(media) {
+        if (media.localFilePath != null && File(media.localFilePath).exists()) {
+            Uri.fromFile(File(media.localFilePath))
+        } else if (media.streamUrl.startsWith("http://") || media.streamUrl.startsWith("https://")) {
+            Uri.parse(media.streamUrl)
+        } else {
+            Uri.parse(FALLBACK_VIDEO_URL)
+        }
+    }
+
+    DisposableEffect(Unit) {
         onDispose {
             try {
                 mediaPlayerRef?.stop()
@@ -889,10 +1074,6 @@ fun TextureVideoPlayerView(
     AndroidView(
         factory = { ctx ->
             TextureView(ctx).apply {
-                layoutParams = FrameLayout.LayoutParams(
-                    FrameLayout.LayoutParams.MATCH_PARENT,
-                    FrameLayout.LayoutParams.MATCH_PARENT
-                )
                 surfaceTextureListener = object : TextureView.SurfaceTextureListener {
                     override fun onSurfaceTextureAvailable(st: SurfaceTexture, width: Int, height: Int) {
                         val surface = Surface(st)
@@ -994,4 +1175,3 @@ fun AnimatedAudioWave(modifier: Modifier = Modifier) {
         }
     }
 }
-
